@@ -1,0 +1,176 @@
+# 🎉 LaiLai CLI - Interactive Guide
+
+Welcome to the LaiLai CLI project! This is a modern TypeScript command-line application that demonstrates best practices in CLI development.
+
+## 📚 What You'll Learn
+
+- ✅ TypeScript CLI development with ESM modules
+- ✅ Using Commander for argument parsing
+- ✅ Runtime validation with Zod
+- ✅ Beautiful terminal output with Chalk
+- ✅ Professional project structure
+
+---
+
+## 🚀 Quick Start
+
+### Step 1: Install Dependencies
+
+Run this command to install all required packages:
+
+\\\ash
+npm install
+\\\
+
+### Step 2: Run in Development Mode
+
+Try the CLI with a custom greeting:
+
+\\\ash
+npm run dev --name "Your Name"
+\\\
+
+Or use the default greeting:
+
+\\\ash
+npm run dev
+\\\
+
+### Step 3: Build for Production
+
+Compile your TypeScript to JavaScript:
+
+\\\ash
+npm run build
+\\\
+
+### Step 4: Run the Built Application
+
+Execute the compiled version:
+
+\\\ash
+npm start -- --name "Alice"
+\\\
+
+---
+
+## 🌐 Ollama API Methods
+
+This project includes integration with Ollama for AI text generation. Here are the available API methods:
+
+### ✅ Cell 1: Check Ollama Status
+
+**Endpoint**: \GET http://localhost:11434/api/tags\
+
+Check if Ollama is running and list available models.
+
+\\\http
+GET http://localhost:11434/api/tags
+\\\
+
+---
+
+### 🤖 Cell 2: Simple Text Generation
+
+**Endpoint**: \POST http://localhost:11434/api/generate\
+
+Generate text with a simple one-line prompt.
+
+\\\http
+POST http://localhost:11434/api/generate
+Content-Type: application/json
+
+{
+  "model": "gemma4:26b",
+  "prompt": "What is TypeScript?",
+  "stream": false
+}
+\\\
+
+---
+
+### 📚 Cell 3: Multi-line Prompt with Temperature
+
+**Endpoint**: \POST http://localhost:11434/api/generate\
+
+Generate text with a longer prompt and temperature control.
+
+\\\http
+POST http://localhost:11434/api/generate
+Content-Type: application/json
+
+{
+  "model": "gemma4:26b",
+  "prompt": "Explain the difference between var, let, and const in JavaScript",
+  "stream": false,
+  "temperature": 0.7
+}
+\\\
+
+---
+
+### 💻 Cell 4: Code Generation
+
+**Endpoint**: \POST http://localhost:11434/api/generate\
+
+Generate code snippets using AI.
+
+\\\http
+POST http://localhost:11434/api/generate
+Content-Type: application/json
+
+{
+  "model": "gemma4:26b",
+  "prompt": "Write a function to calculate the factorial of a number in TypeScript",
+  "stream": false
+}
+\\\
+
+---
+
+### 🔄 Cell 5: Streaming Response
+
+**Endpoint**: \POST http://localhost:11434/api/generate\
+
+Enable streaming for real-time response output.
+
+\\\http
+POST http://localhost:11434/api/generate
+Content-Type: application/json
+
+{
+  "model": "gemma4:26b",
+  "prompt": "List 5 best practices for REST APIs",
+  "stream": true
+}
+\\\
+
+---
+
+### 💬 Cell 6: Chat Endpoint
+
+**Endpoint**: \POST http://localhost:11434/api/chat\
+
+Use the chat API for conversation-style interactions.
+
+\\\http
+POST http://localhost:11434/api/chat
+Content-Type: application/json
+
+{
+  "model": "gemma4:26b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is a CLI application?"
+    }
+  ],
+  "stream": false
+}
+\\\
+
+---
+
+#Happy Coding!
+
+You now have a professional TypeScript CLI foundation with AI capabilities!

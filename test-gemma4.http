@@ -1,0 +1,70 @@
+### Test Ollama Gemma4 Model
+
+### Check if Ollama is running
+GET http://localhost:11434/api/tags
+
+###
+
+### Generate text with Gemma4 - Simple prompt
+POST http://localhost:11434/api/generate
+Content-Type: application/json
+
+{
+  "model": "gemma4:26b",
+  "prompt": "What is TypeScript?",
+  "stream": false
+}
+
+###
+
+### Generate text with Gemma4 - Multi-line prompt
+POST http://localhost:11434/api/generate
+Content-Type: application/json
+
+{
+  "model": "gemma4:26b",
+  "prompt": "Explain the difference between var, let, and const in JavaScript",
+  "stream": false,
+  "temperature": 0.7
+}
+
+###
+
+### Generate text with Gemma4 - CodeGeneration
+POST http://localhost:11434/api/generate
+Content-Type: application/json
+
+{
+  "model": "gemma4:26b",
+  "prompt": "Write a function to calculate the factorial of a number in TypeScript",
+  "stream": false
+}
+
+###
+
+### Generate with streaming enabled
+POST http://localhost:11434/api/generate
+Content-Type: application/json
+
+{
+  "model": "gemma4:26b",
+  "prompt": "List 5 best practices for REST APIs",
+  "stream": true
+}
+
+###
+
+### Chat endpoint (if available)
+POST http://localhost:11434/api/chat
+Content-Type: application/json
+
+{
+  "model": "gemma4:26b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is a CLI application?"
+    }
+  ],
+  "stream": false
+}
