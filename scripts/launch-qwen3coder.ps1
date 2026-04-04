@@ -2,8 +2,10 @@
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 $LLAMA_SERVER_PATH = "D:\Llama-Server-Exes\llama-b8662-bin-win-hip-radeon-x64\llama-server.exe"
-$GGUF_MODEL_PATH = "D:\Projects\LAILAI\dist-offline\win-unpacked\resources\backend\models\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf"
 #$GGUF_MODEL_PATH = "D:\Projects\LAILAI\dist-offline\win-unpacked\resources\backend\models\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf"
+$GGUF_MODEL_PATH = "D:\Projects\LAILAI\dist-offline\win-unpacked\resources\backend\models\gemma-4-31B-it-Q4_K_M.gguf"
+#$GGUF_MODEL_PATH = "D:\Projects\LAILAI\dist-offline\win-unpacked\resources\backend\models\Qwen3-VL-30B-A3B-Instruct-Q2_K.gguf"
+
 $SERVER_HOST = "127.0.0.1"
 $SERVER_PORT = 8000
 $API_HEALTH_URL = "http://$SERVER_HOST:8000/health"
