@@ -34,7 +34,7 @@ const globalStart = Date.now();
 let ttftMs = null;
 let tokenCount = 0;
 
-const req = http.request('http://localhost:8000/api/generate', {
+const req = http.request('http://localhost:8000/completion', {
     method: 'POST',
     headers: {
         'Content-Type': 'application/json',
