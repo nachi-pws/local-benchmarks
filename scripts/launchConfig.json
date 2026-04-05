@@ -72,7 +72,8 @@
       "id": 4,
       "name": "GLM-4.6V-Flash",
       "filename": "GLM-4.6V-Flash-Q8_0.gguf",
-      "path": "D:\\Projects\\LAILAI\\dist-offMulti-modal reasoning, optimized speed",
+      "path": "D:\\Projects\\LAILAI\\dist-offline\\win-unpacked\\resources\\backend\\models\\GLM-4.6V-Flash-Q8_0.gguf",
+      "description": "GLM 4.6 Vision Flash - Multi-modal reasoning, optimized speed",
       "parameters": {
         "temperature": 1.0,
         "top_p": 0.95,

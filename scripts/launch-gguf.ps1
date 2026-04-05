@@ -1,27 +1,14 @@
 #!/usr/bin/env pwsh
-<#
-.SYNOPSIS
-    Launch GGUF models with llama-server with interactive model and version selection.
-.DESCRIPTION
-    This script reads launchConfig.json to load model configurations and server settings.
-    Allows interactive selection of models and llama-server versions with graceful shutdown.
-.EXAMPLE
-    .\launch-gguf.ps1
-#>
+# Launch GGUF models with llama-server with interactive model and version selection.
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-# Configuration
 $ConfigPath = Join-Path $PSScriptRoot "launchConfig.json"
 $GlobalServerStatus = @{
     ProcessId = $null
     ProcessObject = $null
     Running = $false
 }
-
-# ============================================================================
-# CONFIGURATION LOADING
-# ============================================================================
 
 function Load-Configuration {
     if (-not (Test-Path $ConfigPath)) {
@@ -40,26 +27,22 @@ function Load-Configuration {
     }
 }
 
-# ============================================================================
-# USER INTERACTION & SELECTION
-# ============================================================================
-
 function Show-ModelSelection {
     param([object]$Config)
     
     Write-Host ""
-    Write-Host "╔════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "║                     SELECT MODEL                           ║" -ForegroundColor Cyan
-    Write-Host "╚════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host "=============================================================" -ForegroundColor Cyan
+    Write-Host "                     SELECT MODEL                           " -ForegroundColor Cyan
+    Write-Host "=============================================================" -ForegroundColor Cyan
     Write-Host ""
     
     foreach ($model in $Config.models) {
         $status = ""
         if ($model.description -match "(RECOMMENDED)") {
-            $status = " ⭐ RECOMMENDED"
+            $status = " [RECOMMENDED]"
         }
         Write-Host "  [$($model.id)] $($model.name)$status" -ForegroundColor Yellow
-        Write-Host "      └─ $($model.description)" -ForegroundColor Gray
+        Write-Host "      | $($model.description)" -ForegroundColor Gray
     }
     
     Write-Host ""
@@ -78,17 +61,18 @@ function Show-VersionSelection {
     param([object]$Config)
     
     Write-Host ""
-    Write-Host "╔════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "║                SELECT LLAMA-SERVER VERSION                 ║" -ForegroundColor Cyan
-    Write-Host "╚════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host "=============================================================" -ForegroundColor Cyan
+    Write-Host "                SELECT LLAMA-SERVER VERSION                 " -ForegroundColor Cyan
+    Write-Host "=============================================================" -ForegroundColor Cyan
     Write-Host ""
     
     $versions = $Config.llamaServerVersions.available
     $versionList = @()
     $index = 1
     
-    foreach ($key in $versions.Keys) {
-        $version = $versions[$key]
+    foreach ($prop in $versions.PSObject.Properties) {
+        $key = $prop.Name
+        $version = $prop.Value
         $isDefault = if ($key -eq $Config.llamaServerVersions.default) { " (DEFAULT)" } else { "" }
         Write-Host "  [$index] $($version.label)$isDefault" -ForegroundColor Yellow
         $versionList += $key
@@ -111,10 +95,6 @@ function Show-VersionSelection {
     }
 }
 
-# ============================================================================
-# SERVER VALIDATION
-# ============================================================================
-
 function Test-ServerRunning {
     param(
         [string]$ServerHost,
@@ -125,8 +105,7 @@ function Test-ServerRunning {
     
     try {
         $TimeoutSec = [math]::Max(1, [math]::Ceiling($TimeoutMs / 1000))
-        $response = Invoke-WebRequest -Uri "http://${ServerHost}:${ServerPort}${HealthEndpoint}" `
-            -Method GET -TimeoutSec $TimeoutSec -UseBasicParsing -ErrorAction Stop
+        $response = Invoke-WebRequest -Uri "http://${ServerHost}:${ServerPort}${HealthEndpoint}" -Method GET -TimeoutSec $TimeoutSec -UseBasicParsing -ErrorAction Stop
         return $response.StatusCode -eq 200
     }
     catch {
@@ -153,10 +132,6 @@ function Test-PathsExist {
     return $errors
 }
 
-# ============================================================================
-# PARAMETER DISPLAY
-# ============================================================================
-
 function Display-ModelParameters {
     param(
         [object]$Model,
@@ -165,9 +140,9 @@ function Display-ModelParameters {
     )
     
     Write-Host ""
-    Write-Host "╔════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "║            STARTUP CONFIGURATION SUMMARY                   ║" -ForegroundColor Cyan
-    Write-Host "╚════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host "=============================================================" -ForegroundColor Cyan
+    Write-Host "            STARTUP CONFIGURATION SUMMARY                   " -ForegroundColor Cyan
+    Write-Host "=============================================================" -ForegroundColor Cyan
     Write-Host ""
     
     Write-Host "MODEL INFORMATION:" -ForegroundColor Green
@@ -202,17 +177,13 @@ function Display-ModelParameters {
     Write-Host ""
 }
 
-# ============================================================================
-# SERVER STARTUP
-# ============================================================================
-
 function Start-LlamaServer {
     param(
         [string]$LlamaServerPath,
         [string]$ModelPath,
         [object]$Parameters,
-        [string]$Host,
-        [int]$Port
+        [string]$ServerHost,
+        [int]$ServerPort
     )
     
     Write-Host "[START] Launching llama-server..." -ForegroundColor Green
@@ -220,8 +191,8 @@ function Start-LlamaServer {
     
     $arguments = @(
         "-m", $ModelPath,
-        "--host", $Host,
-        "--port", $Port,
+        "--host", $ServerHost,
+        "--port", $ServerPort,
         "-c", $Parameters.ctx_size,
         "-n", $Parameters.n_predict,
         "-t", $Parameters.n_threads,
@@ -234,12 +205,11 @@ function Start-LlamaServer {
     )
     
     if ($Parameters.flash_attn) {
-        $arguments += "--flash-attn"
+        $arguments += "--flash-attn", "1"
     }
     
     try {
-        $process = Start-Process -FilePath $LlamaServerPath -ArgumentList $arguments `
-            -NoNewWindow -PassThru -ErrorAction Stop
+        $process = Start-Process -FilePath $LlamaServerPath -ArgumentList $arguments -NoNewWindow -PassThru -ErrorAction Stop
         
         Write-Host "[OK] Process started (PID: $($process.Id))" -ForegroundColor Green
         $GlobalServerStatus.ProcessId = $process.Id
@@ -258,10 +228,6 @@ function Start-LlamaServer {
         return $null
     }
 }
-
-# ============================================================================
-# SERVER READINESS WAITING
-# ============================================================================
 
 function Wait-ServerReady {
     param(
@@ -289,8 +255,7 @@ function Wait-ServerReady {
     
     $attempt = 0
     while ($attempt -lt $maxAttempts) {
-        if (Test-ServerRunning -ServerHost $serverHost -ServerPort $serverPort `
-            -HealthEndpoint $healthEndpoint -TimeoutMs $timeoutMs) {
+        if (Test-ServerRunning -ServerHost $serverHost -ServerPort $serverPort -HealthEndpoint $healthEndpoint -TimeoutMs $timeoutMs) {
             Write-Host "[READY] Server is ready!" -ForegroundColor Green
             $GlobalServerStatus.Running = $true
             return $true
@@ -306,10 +271,6 @@ function Wait-ServerReady {
     return $false
 }
 
-# ============================================================================
-# GRACEFUL SHUTDOWN
-# ============================================================================
-
 function Stop-LlamaServerGracefully {
     if ($GlobalServerStatus.ProcessId -eq $null -or -not (Test-Path "Proc:\$($GlobalServerStatus.ProcessId)")) {
         Write-Host "[INFO] Server is not running" -ForegroundColor Yellow
@@ -322,10 +283,8 @@ function Stop-LlamaServerGracefully {
     try {
         $process = Get-Process -Id $GlobalServerStatus.ProcessId -ErrorAction Stop
         
-        # Send SIGTERM first (graceful shutdown)
         Stop-Process -Id $GlobalServerStatus.ProcessId -ErrorAction Stop
         
-        # Wait up to 10 seconds for graceful shutdown
         $waited = 0
         while ($waited -lt 10 -and -not $process.HasExited) {
             Start-Sleep -Milliseconds 500
@@ -338,7 +297,6 @@ function Stop-LlamaServerGracefully {
             }
         }
         
-        # Force kill if still running
         if (-not $process.HasExited) {
             Write-Host "[WARN] Graceful shutdown timeout, force terminating..." -ForegroundColor Yellow
             Stop-Process -Id $GlobalServerStatus.ProcessId -Force -ErrorAction Stop
@@ -352,59 +310,44 @@ function Stop-LlamaServerGracefully {
     }
 }
 
-# ============================================================================
-# CTRL+C SIGNAL HANDLING
-# ============================================================================
-
 function Enable-GracefulShutdown {
     $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
         Stop-LlamaServerGracefully
     }
 }
 
-# ============================================================================
-# MAIN EXECUTION
-# ============================================================================
-
 function Main {
     Write-Host ""
-    Write-Host "╔════════════════════════════════════════════════════════════╗" -ForegroundColor Magenta
-    Write-Host "║                  GGUF MODEL LAUNCHER                       ║" -ForegroundColor Magenta
-    Write-Host "║              Powered by llama.cpp & llama-server           ║" -ForegroundColor Magenta
-    Write-Host "╚════════════════════════════════════════════════════════════╝" -ForegroundColor Magenta
+    Write-Host "=============================================================" -ForegroundColor Magenta
+    Write-Host "                  GGUF MODEL LAUNCHER                       " -ForegroundColor Magenta
+    Write-Host "              Powered by llama.cpp & llama-server           " -ForegroundColor Magenta
+    Write-Host "=============================================================" -ForegroundColor Magenta
     
-    # Load configuration
     $config = Load-Configuration
     
-    # Model selection
     $selectedModel = Show-ModelSelection -Config $config
     if ($selectedModel -eq $null) {
         exit 1
     }
     
-    # Version selection
     $selectedVersion = Show-VersionSelection -Config $config
-    $versionConfig = $config.llamaServerVersions.available[$selectedVersion]
+    $versionConfig = $config.llamaServerVersions.available | Select-Object -ExpandProperty $selectedVersion
     $llamaServerPath = $versionConfig.path
     
-    # Validate paths
     $pathErrors = Test-PathsExist -LlamaServerPath $llamaServerPath -ModelPath $selectedModel.path
     if ($pathErrors.Count -gt 0) {
         Write-Host ""
         Write-Host "[ERROR] Path validation failed:" -ForegroundColor Red
         foreach ($error in $pathErrors) {
-            Write-Host "  ✗ $error" -ForegroundColor Red
+            Write-Host "  X $error" -ForegroundColor Red
         }
         exit 1
     }
     
-    # Display configuration
     Display-ModelParameters -Model $selectedModel -LlamaServerVersion $selectedVersion -LlamaServerPath $llamaServerPath
     
-    # Check if server already running
     Write-Host "Checking if llama-server is already running..." -ForegroundColor Cyan
-    if (Test-ServerRunning -ServerHost $config.server.host -ServerPort $config.server.port `
-        -HealthEndpoint $config.server.health_check_endpoint -TimeoutMs 2000) {
+    if (Test-ServerRunning -ServerHost $config.server.host -ServerPort $config.server.port -HealthEndpoint $config.server.health_check_endpoint -TimeoutMs 2000) {
         Write-Host "[OK] Server already running on port $($config.server.port)" -ForegroundColor Green
         Write-Host "     Skipping startup (server is ready)" -ForegroundColor Yellow
         Write-Host ""
@@ -415,19 +358,13 @@ function Main {
     else {
         Write-Host "[INFO] No existing instance found, starting new server..." -ForegroundColor Yellow
         
-        # Start server
-        $process = Start-LlamaServer -LlamaServerPath $llamaServerPath `
-            -ModelPath $selectedModel.path `
-            -Parameters $selectedModel.parameters `
-            -Host $config.server.host `
-            -Port $config.server.port
+        $process = Start-LlamaServer -LlamaServerPath $llamaServerPath -ModelPath $selectedModel.path -Parameters $selectedModel.parameters -ServerHost $config.server.host -ServerPort $config.server.port
         
         if ($process -eq $null) {
             Write-Host "[FAIL] Could not start llama-server" -ForegroundColor Red
             exit 1
         }
         
-        # Wait for readiness
         if (-not (Wait-ServerReady -Config $config -Process $process)) {
             Write-Host "[STOP] Terminating failed server process..." -ForegroundColor Yellow
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
@@ -435,40 +372,34 @@ function Main {
         }
     }
     
-    # Server is running
     Write-Host ""
-    Write-Host "╔════════════════════════════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "║               SERVER RUNNING SUCCESSFULLY                  ║" -ForegroundColor Green
-    Write-Host "╚════════════════════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host "=============================================================" -ForegroundColor Green
+    Write-Host "               SERVER RUNNING SUCCESSFULLY                  " -ForegroundColor Green
+    Write-Host "=============================================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "Model:        $($selectedModel.name)" -ForegroundColor Green
     Write-Host "API Endpoint: http://$($config.server.host):$($config.server.port)/completion" -ForegroundColor Green
     Write-Host "PID:          $($GlobalServerStatus.ProcessId)" -ForegroundColor Green
     Write-Host ""
-    Write-Host "╔════════════════════════════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "║  Press Ctrl+C to gracefully shutdown the server           ║" -ForegroundColor Green
-    Write-Host "╚════════════════════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host "=============================================================" -ForegroundColor Green
+    Write-Host "  Press Ctrl+C to gracefully shutdown the server           " -ForegroundColor Green
+    Write-Host "=============================================================" -ForegroundColor Green
     Write-Host ""
     
-    # Enable graceful shutdown handling
     Enable-GracefulShutdown
     
-    # Wait for server process to exit or Ctrl+C
     if ($GlobalServerStatus.ProcessObject -ne $null) {
         try {
             $GlobalServerStatus.ProcessObject.WaitForExit()
         }
         catch {
-            # Process already exited
         }
     }
     else {
-        # Server was already running, wait for Ctrl+C
         while ($true) {
             Start-Sleep -Seconds 1
         }
     }
 }
 
-# Run main
 Main
