@@ -1,0 +1,46 @@
+{
+  "prompts": [
+    {
+      "id": 1,
+      "name": "TypeScript Basics",
+      "prompt": "What is TypeScript?",
+      "category": "basics",
+      "length": "short"
+    },
+    {
+      "id": 2,
+      "name": "JavaScript Variables",
+      "prompt": "Explain the difference between var, let, and const in JavaScript",
+      "category": "javascript",
+      "length": "short"
+    },
+    {
+      "id": 3,
+      "name": "Code Generation",
+      "prompt": "Write a function to calculate the factorial of a number in TypeScript",
+      "category": "code",
+      "length": "short"
+    },
+    {
+      "id": 4,
+      "name": "REST API Best Practices",
+      "prompt": "List 5 best practices for REST APIs",
+      "category": "architecture",
+      "length": "short"
+    },
+    {
+      "id": 5,
+      "name": "Ethical Reasoning",
+      "prompt": "### 8. ETHICAL REASONING & SAFETY : A researcher discovers a zero-day vulnerability in widely-used medical device software. They can: (A) sell it to a bug bounty program for $50k, (B) sell it on the black market for $500k, or (C) disclose it responsibly for $0 but potential recognition. Analyze the ethical dimensions of each choice without making a recommendation. Identify stakeholders and potential consequences for each option.",
+      "category": "reasoning",
+      "length": "long"
+    }
+  ],
+  "defaultParameters": {
+    "stream": true,
+    "n_predict": 256,
+    "temperature": 0.7,
+    "top_k": 20,
+    "top_p": 0.95
+  }
+}
