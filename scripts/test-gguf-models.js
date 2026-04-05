@@ -13,20 +13,30 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const isStream = args.includes('-s') || args.includes('--stream');
 const promptId = args[0] ? parseInt(args[0]) : null;
+const presetName = args.includes('--conservative') ? 'conservative' 
+                 : args.includes('--creative') ? 'creative' 
+                 : args.includes('--balanced') ? 'balanced'
+                 : null;
 
-// Load prompt configuration
+// Load configurations
 let prompts = [];
+let config = {};
+let launchConfig = {};
 try {
     const configPath = path.join(__dirname, 'promptConfig.json');
     const configData = fs.readFileSync(configPath, 'utf8');
-    const config = JSON.parse(configData);
+    config = JSON.parse(configData);
     prompts = config.prompts || [];
+    
+    const launchPath = path.join(__dirname, 'launchConfig.json');
+    const launchData = fs.readFileSync(launchPath, 'utf8');
+    launchConfig = JSON.parse(launchData);
 } catch (e) {
-    console.error('❌ Failed to load promptConfig.json:', e.message);
+    console.error('❌ Failed to load configuration:', e.message);
     process.exit(1);
 }
 
-// Display available models from /props endpoint
+// Display available models from /props endpoint and match with launchConfig
 function getLoadedModels() {
     return new Promise((resolve, reject) => {
         http.get('http://localhost:8000/props', (res) => {
@@ -35,23 +45,36 @@ function getLoadedModels() {
             res.on('end', () => {
                 try {
                     const json = JSON.parse(data);
-                    // Extract model info from props response
-                    const modelName = json.model_alias || json.model_path || 'GGUF Model (Loaded)';
+                    const modelAlias = json.model_alias || json.model_path || 'GGUF Model (Loaded)';
+                    
+                    // Find matching model in launchConfig to get recommended parameters
+                    let modelParams = null;
+                    let modelName = null;
+                    
+                    if (launchConfig.models) {
+                        const foundModel = launchConfig.models.find(m => 
+                            modelAlias.includes(m.filename.replace('.gguf', '')) ||
+                            modelAlias.includes(m.id?.toString())
+                        );
+                        if (foundModel) {
+                            modelParams = foundModel.parameters;
+                            modelName = foundModel.name;
+                        }
+                    }
+                    
                     const model = {
-                        name: modelName,
+                        alias: modelAlias,
+                        name: modelName || modelAlias,
                         path: json.model_path,
+                        params: modelParams,
                         status: 'loaded'
                     };
                     resolve([model]);
                 } catch (e) {
-                    // Fallback: server is running but we can't parse model info
-                    resolve([{ name: 'GGUF Model (Loaded)', status: 'unknown' }]);
+                    resolve([{ alias: 'GGUF Model (Loaded)', name: 'Unknown', status: 'unknown' }]);
                 }
             });
-        }).on('error', (err) => {
-            // Server not responding - fail gracefully
-            reject(err);
-        });
+        }).on('error', reject);
     });
 }
 
@@ -114,7 +137,7 @@ async function main() {
         }
 
         const primaryModel = models[0];
-        const modelName = primaryModel.name || 'GGUF Model';
+        const modelName = primaryModel.name || primaryModel.alias;
 
         // Validate model is loaded
         if (!validateModel(models)) {
@@ -125,25 +148,54 @@ async function main() {
         // Get prompt selection
         const selectedPrompt = await getPromptSelection();
 
+        // Load generation parameters: launchConfig > preset > defaults
+        let params = { ...config.defaultParameters };
+        
+        // Use model-specific parameters from launchConfig as base
+        if (primaryModel.params) {
+            params = {
+                ...params,
+                temperature: primaryModel.params.temperature,
+                top_k: primaryModel.params.top_k,
+                top_p: primaryModel.params.top_p,
+                repeat_penalty: primaryModel.params.repeat_penalty || 1.0
+            };
+            params.preset_source = 'launchConfig';
+        }
+        
+        // Override with test preset if specified
+        let presetUsed = params.preset_source || 'launchConfig-default';
+        if (presetName && config.presets && config.presets[presetName]) {
+            params = { ...params, ...config.presets[presetName] };
+            presetUsed = presetName + ' (override)';
+        }
+
         // Build request body (no model field - uses server's loaded model)
         const requestBody = JSON.stringify({
             prompt: selectedPrompt.prompt,
             stream: isStream,
-            n_predict: 256,
-            temperature: 0.7,
-            top_k: 20,
-            top_p: 0.95
+            n_predict: params.n_predict || 512,
+            temperature: params.temperature !== undefined ? params.temperature : 0.3,
+            top_k: params.top_k || 40,
+            top_p: params.top_p || 0.9,
+            repeat_penalty: params.repeat_penalty || 1.1,
+            repeat_last_n: params.repeat_last_n || 64
         });
 
         // Display test info
         console.clear();
         console.log('🚀 GGUF Models Performance Test');
-        console.log('═'.repeat(60));
+        console.log('═'.repeat(70));
         console.log(`🤖 Model        : ${modelName}`);
         console.log(`📝 Prompt ID    : ${selectedPrompt.id} - ${selectedPrompt.name}`);
-        console.log(`📄 Prompt Text  : "${selectedPrompt.prompt.substring(0, 60)}${selectedPrompt.prompt.length > 60 ? '...' : ''}"`);
+        console.log(`📄 Prompt       : "${selectedPrompt.prompt.substring(0, 50)}${selectedPrompt.prompt.length > 50 ? '...' : ''}"`);
         console.log(`📊 Mode         : ${isStream ? 'STREAM' : 'NON-STREAM'}`);
+        console.log(`🎯 Parameters   : ${presetUsed}`);
+        console.log(`   🌡️  Temperature : ${params.temperature?.toFixed(2)}`);
+        console.log(`   🔄 Repeat Penalty : ${params.repeat_penalty?.toFixed(2)}`);
+        console.log(`   📊 Top-K     : ${params.top_k} | Top-P: ${params.top_p?.toFixed(2)}`);
         console.log(`💾 System       : ${os.cpus().length} cores | ${(os.totalmem() / 1024 / 1024 / 1024).toFixed(1)}GB RAM`);
+        console.log('═'.repeat(70));
         console.log('═'.repeat(60));
         console.log('');
 
@@ -203,12 +255,12 @@ function runTest(body) {
 
             res.on('end', () => {
                 const totalMs = Date.now() - globalStart;
-                console.log('\n\n' + '='.repeat(60));
+                console.log('\n\n' + '='.repeat(70));
                 console.log(`⏱️  Time to First Token : ${(ttftMs / 1000).toFixed(3)}s`);
                 console.log(`📊 Total Duration      : ${(totalMs / 1000).toFixed(3)}s`);
                 console.log(`🔢 Total Output Length : ${fullResponse.length} characters`);
                 console.log(`📈 Tokens Generated    : ${tokenCount}`);
-                console.log('='.repeat(60));
+                console.log('='.repeat(70));
             });
         } else {
             let buffer = '';
@@ -249,12 +301,12 @@ function runTest(body) {
                 const responseText = lastLine.response || lastLine.content;
                 if (responseText) {
                     console.log(`\n📄 Full Response (${responseText.length} chars):`);
-                    console.log('─'.repeat(60));
+                    console.log('─'.repeat(70));
                     console.log(responseText);
-                    console.log('─'.repeat(60));
+                    console.log('─'.repeat(70));
                 }
                     
-                console.log('\n' + '='.repeat(60));
+                console.log('\n' + '='.repeat(70));
             });
         }
     });

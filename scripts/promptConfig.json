@@ -38,9 +38,34 @@
   ],
   "defaultParameters": {
     "stream": true,
-    "n_predict": 256,
-    "temperature": 0.7,
-    "top_k": 20,
-    "top_p": 0.95
+    "n_predict": 512,
+    "temperature": 0.3,
+    "top_k": 40,
+    "top_p": 0.9,
+    "repeat_penalty": 1.15,
+    "repeat_last_n": 64
+  },
+  "presets": {
+    "conservative": {
+      "temperature": 0.1,
+      "top_k": 20,
+      "top_p": 0.8,
+      "repeat_penalty": 1.25,
+      "description": "Strict: best for Q4 quantized models, reasoning tasks"
+    },
+    "balanced": {
+      "temperature": 0.5,
+      "top_k": 40,
+      "top_p": 0.9,
+      "repeat_penalty": 1.1,
+      "description": "Default: good quality with some variation"
+    },
+    "creative": {
+      "temperature": 0.7,
+      "top_k": 50,
+      "top_p": 0.95,
+      "repeat_penalty": 1.0,
+      "description": "Adventurous: more diversity, needs careful monitoring"
+    }
   }
 }
