@@ -14,6 +14,29 @@ const prompt = longPrompt
     ? 'List 5 best practices for REST APIs'
     : '### 8. ETHICAL REASONING & SAFETY : A researcher discovers a zero-day vulnerability in widely-used medical device software. They can: (A) sell it to a bug bounty program for $50k, (B) sell it on the black market for $500k, or (C) disclose it responsibly for $0 but potential recognition. Analyze the ethical dimensions of each choice without making a recommendation. Identify stakeholders and potential consequences for each option.';
 
+// Fetch available models from /tags endpoint
+function getLoadedModel() {
+    return new Promise((resolve, reject) => {
+        http.get('http://localhost:8000/tags', (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(data);
+                    const models = json.models || [];
+                    if (models.length > 0) {
+                        resolve(models[0].model || models[0].name);
+                    } else {
+                        resolve('Unknown Model');
+                    }
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        }).on('error', reject);
+    });
+}
+
 // llama-server parameters (no model field - server uses loaded model)
 const body = JSON.stringify({
     prompt,
@@ -24,14 +47,24 @@ const body = JSON.stringify({
     top_p: 0.95,
 });
 
-console.log('🚀 Llama-Server Performance Test');
-console.log(`📝 Prompt: "${prompt}" (${prompt.length} chars)`);
-console.log(`📊 Mode: ${isStream ? 'STREAM' : 'NON-STREAM'}`);
-console.log(`💾 CPU: ${os.cpus().length} cores | RAM: 128GB`);
-console.log(`🤖 Model: Qwen3-Coder-30B-A3B (loaded via llama-server)\n`);
+// Get model and start test
+getLoadedModel().then(modelName => {
+    console.log('🚀 Llama-Server Performance Test');
+    console.log(`📝 Prompt: "${prompt}" (${prompt.length} chars)`);
+    console.log(`📊 Mode: ${isStream ? 'STREAM' : 'NON-STREAM'}`);
+    console.log(`💾 CPU: ${os.cpus().length} cores | RAM: 128GB`);
+    console.log(`🤖 Model: ${modelName}\n`);
+    
+    runTest();
+}).catch(err => {
+    console.error('❌ Failed to fetch model info:', err.message);
+    process.exit(1);
+});
 
+function runTest() {
 const globalStart = Date.now();
 let ttftMs = null;
+let fullResponse = '';
 let tokenCount = 0;
 
 const req = http.request('http://localhost:8000/completion', {
@@ -65,8 +98,11 @@ const req = http.request('http://localhost:8000/completion', {
                     }
                     try {
                         const json = JSON.parse(line);
-                        if (json.response) {
-                            process.stdout.write(json.response);
+                        // Handle both "response" (llama-server) and "content" (ollama/other models) fields
+                        const text = json.response || json.content;
+                        if (text) {
+                            process.stdout.write(text);
+                            fullResponse += text;
                         }
                     } catch (e) {}
                 }
@@ -78,7 +114,7 @@ const req = http.request('http://localhost:8000/completion', {
             console.log('\n\n' + '='.repeat(60));
             console.log(`⏱️  Time to First Token : ${(ttftMs / 1000).toFixed(3)}s`);
             console.log(`📊 Total Duration      : ${(totalMs / 1000).toFixed(3)}s`);
-            console.log(`🔢 Tokens Generated    : ${tokenCount}`);
+            console.log(`🔢 Total Output Length : ${fullResponse.length} characters`);
             console.log('='.repeat(60));
         });
     } else {
@@ -117,9 +153,12 @@ const req = http.request('http://localhost:8000/completion', {
             console.log(`\nClient Metrics:`);
             console.log(`  Total Request : ${(totalMs / 1000).toFixed(3)}s`);
             
-            if (lastLine.response) {
-                console.log(`\nResponse Preview:`);
-                console.log(lastLine.response.substring(0, 300));
+            const responseText = lastLine.response || lastLine.content;
+            if (responseText) {
+                console.log(`\n📄 Full Response (${responseText.length} chars):`);
+                console.log('─'.repeat(60));
+                console.log(responseText);
+                console.log('─'.repeat(60));
             }
                 
             console.log('\n' + '='.repeat(60));
@@ -134,3 +173,4 @@ req.on('error', (e) => {
 
 req.write(body);
 req.end();
+}

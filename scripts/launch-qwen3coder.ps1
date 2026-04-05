@@ -1,10 +1,15 @@
 #!/usr/bin/env pwsh
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$LLAMA_SERVER_PATH = "D:\Llama-Server-Exes\llama-b8662-bin-win-hip-radeon-x64\llama-server.exe"
+#$LLAMA_SERVER_PATH = "D:\Llama-Server-Exes\llama-b8662-bin-win-hip-radeon-x64\llama-server.exe"
+$LLAMA_SERVER_PATH = "D:\Llama-Server-Exes\llama-b8665-bin-win-hip-radeon-x64\llama-server.exe"
 #$GGUF_MODEL_PATH = "D:\Projects\LAILAI\dist-offline\win-unpacked\resources\backend\models\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf"
-$GGUF_MODEL_PATH = "D:\Projects\LAILAI\dist-offline\win-unpacked\resources\backend\models\gemma-4-31B-it-Q4_K_M.gguf"
+#$GGUF_MODEL_PATH = "D:\Projects\LAILAI\dist-offline\win-unpacked\resources\backend\models\gemma-4-31B-it-Q4_K_M.gguf"
 #$GGUF_MODEL_PATH = "D:\Projects\LAILAI\dist-offline\win-unpacked\resources\backend\models\Qwen3-VL-30B-A3B-Instruct-Q2_K.gguf"
+$GGUF_MODEL_PATH = "D:\Projects\LAILAI\dist-offline\win-unpacked\resources\backend\models\GLM-4.6V-Flash-Q8_0.gguf"
+#$GGUF_MODEL_PATH = "D:\Projects\LAILAI\dist-offline\win-unpacked\resources\backend\models\LFM2-24B-A2B-Q4_0.gguf"
+#$GGUF_MODEL_PATH = "D:\Projects\LAILAI\dist-offline\win-unpacked\resources\backend\models\Qwen3.5-9B.Q5_K_M.gguf"
+
 
 $SERVER_HOST = "127.0.0.1"
 $SERVER_PORT = 8000
@@ -89,9 +94,13 @@ function Wait-ServerReady {
 }
 
 function Main {
+    # Extract model name from path
+    $modelName = [System.IO.Path]::GetFileNameWithoutExtension($GGUF_MODEL_PATH)
+    
     Write-Host ""
     Write-Host "===============================================" -ForegroundColor Magenta
-    Write-Host "     QWEN3 CODER LLAMA-SERVER LAUNCHER" -ForegroundColor Magenta
+    Write-Host "     LLAMA-SERVER LAUNCHER" -ForegroundColor Magenta
+    Write-Host "     Model: $modelName" -ForegroundColor Magenta
     Write-Host "===============================================" -ForegroundColor Magenta
     Write-Host ""
     
@@ -137,9 +146,10 @@ function Main {
     Write-Host ""
     Write-Host "===============================================" -ForegroundColor Green
     Write-Host "     SERVER RUNNING SUCCESSFULLY" -ForegroundColor Green
+    Write-Host "     Model: $modelName" -ForegroundColor Green
     Write-Host "===============================================" -ForegroundColor Green
     Write-Host "Process ID: $($process.Id)" -ForegroundColor Green
-    Write-Host "API: http://$SERVER_HOST:8000/api/generate" -ForegroundColor Green
+    Write-Host "API: http://$SERVER_HOST:8000/completion" -ForegroundColor Green
     Write-Host "===============================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "Press Ctrl+C to stop" -ForegroundColor Cyan

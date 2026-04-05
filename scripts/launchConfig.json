@@ -1,0 +1,135 @@
+{
+  "llamaServerVersions": {
+    "default": "b8665",
+    "available": {
+      "b8662": {
+        "path": "D:\\Llama-Server-Exes\\llama-b8662-bin-win-hip-radeon-x64\\llama-server.exe",
+        "label": "Build 8662 (HIP Radeon)"
+      },
+      "b8665": {
+        "path": "D:\\Llama-Server-Exes\\llama-b8665-bin-win-hip-radeon-x64\\llama-server.exe",
+        "label": "Build 8665 (HIP Radeon) - RECOMMENDED"
+      }
+    }
+  },
+  "models": [
+    {
+      "id": 1,
+      "name": "Qwen3-Coder-30B-A3B",
+      "filename": "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
+      "path": "D:\\Projects\\LAILAI\\dist-offline\\win-unpacked\\resources\\backend\\models\\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
+      "description": "Qwen3 Coder 30B - Code-specialized, long-context (256K native)",
+      "parameters": {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "min_p": 0.01,
+        "repeat_penalty": 1.05,
+        "top_k": 20,
+        "ctx_size": 32768,
+        "n_predict": 65536,
+        "n_threads": 16,
+        "n_gpu_layers": 99
+      }
+    },
+    {
+      "id": 2,
+      "name": "Gemma-4-31B",
+      "filename": "gemma-4-31B-it-Q4_K_M.gguf",
+      "path": "D:\\Projects\\LAILAI\\dist-offline\\win-unpacked\\resources\\backend\\models\\gemma-4-31B-it-Q4_K_M.gguf",
+      "description": "Gemma 4 31B - Multimodal, reasoning, coding (256K context)",
+      "parameters": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "min_p": 0.01,
+        "repeat_penalty": 1.0,
+        "top_k": 64,
+        "ctx_size": 131072,
+        "n_predict": 2048,
+        "n_threads": 16,
+        "n_gpu_layers": 99
+      }
+    },
+    {
+      "id": 3,
+      "name": "Qwen3-VL-30B-A3B",
+      "filename": "Qwen3-VL-30B-A3B-Instruct-Q2_K.gguf",
+      "path": "D:\\Projects\\LAILAI\\dist-offline\\win-unpacked\\resources\\backend\\models\\Qwen3-VL-30B-A3B-Instruct-Q2_K.gguf",
+      "description": "Qwen3 Vision Language 30B - Advanced multimodal (256K native)",
+      "parameters": {
+        "temperature": 0.8,
+        "top_p": 0.95,
+        "min_p": 0.01,
+        "repeat_penalty": 1.0,
+        "top_k": 20,
+        "ctx_size": 131072,
+        "n_predict": 2048,
+        "n_threads": 16,
+        "n_gpu_layers": 99,
+        "flash_attn": true
+      }
+    },
+    {
+      "id": 4,
+      "name": "GLM-4.6V-Flash",
+      "filename": "GLM-4.6V-Flash-Q8_0.gguf",
+      "path": "D:\\Projects\\LAILAI\\dist-offMulti-modal reasoning, optimized speed",
+      "parameters": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "min_p": 0.01,
+        "repeat_penalty": 1.0,
+        "top_k": 0,
+        "ctx_size": 65536,
+        "n_predict": 4096,
+        "n_threads": 16,
+        "n_gpu_layers": 99,
+        "flash_attn": true
+      }
+    },
+    {
+      "id": 5,
+      "name": "LFM2-24B-A2B",
+      "filename": "LFM2-24B-A2B-Q4_0.gguf",
+      "path": "D:\\Projects\\LAILAI\\dist-offline\\win-unpacked\\resources\\backend\\models\\LFM2-24B-A2B-Q4_0.gguf",
+      "description": "LFM2 24B active - General purpose, long context support",
+      "parameters": {
+        "temperature": 0.8,
+        "top_p": 0.9,
+        "min_p": 0.01,
+        "repeat_penalty": 1.0,
+        "top_k": 40,
+        "ctx_size": 32768,
+        "n_predict": 2048,
+        "n_threads": 16,
+        "n_gpu_layers": 99
+      }
+    },
+    {
+      "id": 6,
+      "name": "Qwen3.5-9B",
+      "filename": "Qwen3.5-9B.Q5_K_M.gguf",
+      "path": "D:\\Projects\\LAILAI\\dist-offline\\win-unpacked\\resources\\backend\\models\\Qwen3.5-9B.Q5_K_M.gguf",
+      "description": "Qwen 3.5 9B - Fast, lightweight, multimodal (262K native)",
+      "parameters": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "min_p": 0.0,
+        "repeat_penalty": 1.0,
+        "top_k": 20,
+        "ctx_size": 131072,
+        "n_predict": 32768,
+        "n_threads": 16,
+        "n_gpu_layers": 99
+      }
+    }
+  ],
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8000,
+    "health_check_endpoint": "/slots",
+    "health_check_timeout_ms": 3000,
+    "startup_delay_ms": 30000,
+    "max_wait_attempts": 180,
+    "attempt_interval_ms": 2000
+  }
+}
