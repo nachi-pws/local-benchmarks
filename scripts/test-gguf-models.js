@@ -9,14 +9,82 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Global state for graceful shutdown
+let activeRequest = null;
+let isShuttingDown = false;
+
+// Handle graceful shutdown
+function setupGracefulShutdown() {
+    const handleShutdown = async (signal) => {
+        if (isShuttingDown) return;
+        isShuttingDown = true;
+
+        console.log(`\n\n⚠️  ${signal} received - shutting down gracefully...`);
+        
+        // Abort active request if one exists
+        if (activeRequest) {
+            try {
+                activeRequest.destroy();
+                console.log('✋ Request cancelled');
+            } catch (e) {
+                // Silently fail if request already closed
+            }
+        }
+
+        // Close any open readline interfaces
+        if (global.openReadlines) {
+            global.openReadlines.forEach(rl => {
+                try {
+                    rl.close();
+                } catch (e) {}
+            });
+            global.openReadlines = [];
+        }
+
+        console.log('👋 Goodbye!\n');
+        process.exit(0);
+    };
+
+    // Listen for termination signals
+    process.on('SIGINT', () => handleShutdown('SIGINT (Ctrl+C)'));
+    process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+    process.on('SIGHUP', () => handleShutdown('SIGHUP'));
+
+    // Handle uncaught exceptions
+    process.on('uncaughtException', (err) => {
+        console.error('\n❌ Uncaught Exception:', err.message);
+        activeRequest?.destroy();
+        process.exit(1);
+    });
+
+    // Handle unhandled Promise rejections
+    process.on('unhandledRejection', (reason, promise) => {
+        console.error('\n❌ Unhandled Rejection:', reason);
+        activeRequest?.destroy();
+        process.exit(1);
+    });
+}
+
+// Initialize global readline tracker
+global.openReadlines = [];
+
 // Parse command line arguments
 const args = process.argv.slice(2);
 const isStream = args.includes('-s') || args.includes('--stream');
+const isDebug = args.includes('--debug') || args.includes('-d');
+const showReasoning = args.includes('--reasoning') || args.includes('-r');
 const promptId = args[0] ? parseInt(args[0]) : null;
 const presetName = args.includes('--conservative') ? 'conservative' 
                  : args.includes('--creative') ? 'creative' 
                  : args.includes('--balanced') ? 'balanced'
                  : null;
+
+// Debug logging utility
+function debug(...args) {
+    if (isDebug) {
+        console.log(`\n🔍 [DEBUG]`, ...args);
+    }
+}
 
 // Load configurations
 let prompts = [];
@@ -24,11 +92,15 @@ let config = {};
 let launchConfig = {};
 try {
     const configPath = path.join(__dirname, 'promptConfig.json');
+    debug(`Loading config from: ${configPath}`);
     const configData = fs.readFileSync(configPath, 'utf8');
     config = JSON.parse(configData);
     prompts = config.prompts || [];
+    debug(`Loaded ${prompts.length} prompts`);
+    debug(`Default parameters:`, config.defaultParameters);
     
     const launchPath = path.join(__dirname, 'launchConfig.json');
+    debug(`Loading launch config from: ${launchPath}`);
     const launchData = fs.readFileSync(launchPath, 'utf8');
     launchConfig = JSON.parse(launchData);
 } catch (e) {
@@ -39,26 +111,54 @@ try {
 // Display available models from /props endpoint and match with launchConfig
 function getLoadedModels() {
     return new Promise((resolve, reject) => {
+        debug(`Fetching models from http://localhost:8000/props`);
         http.get('http://localhost:8000/props', (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
                 try {
                     const json = JSON.parse(data);
+                    debug(`Received model data:`, json);
                     const modelAlias = json.model_alias || json.model_path || 'GGUF Model (Loaded)';
+                    
+                    debug(`Model alias/path for matching: "${modelAlias}"`);
                     
                     // Find matching model in launchConfig to get recommended parameters
                     let modelParams = null;
                     let modelName = null;
                     
                     if (launchConfig.models) {
-                        const foundModel = launchConfig.models.find(m => 
-                            modelAlias.includes(m.filename.replace('.gguf', '')) ||
-                            modelAlias.includes(m.id?.toString())
+                        debug(`Available models in launchConfig:`, launchConfig.models.map(m => ({
+                            id: m.id,
+                            name: m.name,
+                            filename: m.filename
+                        })));
+                        
+                        // First try exact filename match
+                        let foundModel = launchConfig.models.find(m => 
+                            m.filename === modelAlias
                         );
+                        
+                        if (foundModel) {
+                            debug(`✅ Exact filename match found for: "${foundModel.name}"`);
+                        } else {
+                            // Try case-insensitive filename match
+                            foundModel = launchConfig.models.find(m => 
+                                m.filename.toLowerCase() === modelAlias.toLowerCase()
+                            );
+                            if (foundModel) {
+                                debug(`✅ Case-insensitive filename match found for: "${foundModel.name}"`);
+                            }
+                        }
+                        
                         if (foundModel) {
                             modelParams = foundModel.parameters;
                             modelName = foundModel.name;
+                            debug(`✅ Found matching model in launchConfig:`, foundModel.name);
+                            debug(`Model parameters:`, modelParams);
+                        } else {
+                            debug(`❌ No matching model found in launchConfig for: "${modelAlias}"`);
+                            debug(`Loaded model filename doesn't match any in launchConfig`);
                         }
                     }
                     
@@ -71,10 +171,14 @@ function getLoadedModels() {
                     };
                     resolve([model]);
                 } catch (e) {
+                    debug(`Error parsing model data:`, e.message);
                     resolve([{ alias: 'GGUF Model (Loaded)', name: 'Unknown', status: 'unknown' }]);
                 }
             });
-        }).on('error', reject);
+        }).on('error', (err) => {
+            debug(`Error fetching models:`, err.message);
+            reject(err);
+        });
     });
 }
 
@@ -105,6 +209,15 @@ function getPromptSelection() {
             terminal: true
         });
 
+        // Track readline interface for cleanup
+        global.openReadlines.push(rl);
+
+        // Handle readline closure
+        rl.on('close', () => {
+            const idx = global.openReadlines.indexOf(rl);
+            if (idx > -1) global.openReadlines.splice(idx, 1);
+        });
+
         rl.question('\n🔢 Select prompt ID (1-5): ', (answer) => {
             rl.close();
             const id = parseInt(answer);
@@ -120,6 +233,32 @@ function getPromptSelection() {
     });
 }
 
+// Ask if user wants to include parameters in request
+function askIncludeParams() {
+    return new Promise((resolve) => {
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+            terminal: true
+        });
+
+        // Track readline interface for cleanup
+        global.openReadlines.push(rl);
+
+        // Handle readline closure
+        rl.on('close', () => {
+            const idx = global.openReadlines.indexOf(rl);
+            if (idx > -1) global.openReadlines.splice(idx, 1);
+        });
+
+        rl.question('\n📋 Include parameters in request body? (yes/no) [default: no]: ', (answer) => {
+            rl.close();
+            const response = answer.trim().toLowerCase();
+            resolve(response === 'yes' || response === 'y');
+        });
+    });
+}
+
 // Validate model is loaded
 function validateModel(models) {
     return models && models.length > 0;
@@ -128,6 +267,19 @@ function validateModel(models) {
 // Main execution
 async function main() {
     try {
+        // Show debug status
+        if (isDebug) {
+            console.log('\n🔍 DEBUG MODE ENABLED - Verbose logging active');
+            if (showReasoning) {
+                console.log('🧠 REASONING MODE - Thinking content will be displayed\n');
+            } else {
+                console.log('(Use --reasoning flag to show model thinking)\n');
+            }
+        }
+
+        // Setup graceful shutdown handlers first
+        setupGracefulShutdown();
+
         // Fetch available models
         const models = await getLoadedModels();
         
@@ -147,9 +299,15 @@ async function main() {
 
         // Get prompt selection
         const selectedPrompt = await getPromptSelection();
+        debug(`Selected prompt:`, selectedPrompt);
+
+        // Ask if user wants to include parameters
+        const includeParams = await askIncludeParams();
+        debug(`Include parameters in request:`, includeParams);
 
         // Load generation parameters: launchConfig > preset > defaults
         let params = { ...config.defaultParameters };
+        debug(`Initial params from config:`, params);
         
         // Use model-specific parameters from launchConfig as base
         if (primaryModel.params) {
@@ -161,6 +319,7 @@ async function main() {
                 repeat_penalty: primaryModel.params.repeat_penalty || 1.0
             };
             params.preset_source = 'launchConfig';
+            debug(`Updated params from model config:`, params);
         }
         
         // Override with test preset if specified
@@ -168,20 +327,40 @@ async function main() {
         if (presetName && config.presets && config.presets[presetName]) {
             params = { ...params, ...config.presets[presetName] };
             presetUsed = presetName + ' (override)';
+            debug(`Applied preset override (${presetName}):`, params);
         }
 
         // Build request body using chat completions API
-        const requestBody = JSON.stringify({
+        const requestBodyObj = {
             model: modelName,
             messages: [
                 { role: "user", content: selectedPrompt.prompt }
             ],
-            stream: isStream,
-            max_tokens: params.n_predict || 512,
-            temperature: params.temperature !== undefined ? params.temperature : 0.3,
-            top_k: params.top_k || 40,
-            top_p: params.top_p || 0.9
-        });
+            stream: isStream
+        };
+
+        // Add parameters only if user opted in
+        if (includeParams) {
+            requestBodyObj.max_tokens = params.n_predict || 512;
+            requestBodyObj.temperature = params.temperature !== undefined ? params.temperature : 0.3;
+            requestBodyObj.top_k = params.top_k || 40;
+            requestBodyObj.top_p = params.top_p || 0.9;
+            if (params.repeat_penalty !== undefined) {
+                requestBodyObj.repeat_penalty = params.repeat_penalty;
+            }
+            if (params.min_p !== undefined) {
+                requestBodyObj.min_p = params.min_p;
+            }
+            if (params.frequency_penalty !== undefined) {
+                requestBodyObj.frequency_penalty = params.frequency_penalty;
+            }
+            debug(`Added parameters to request body`);
+        } else {
+            debug(`Request body WITHOUT parameters (minimal)`);
+        }
+
+        const requestBody = JSON.stringify(requestBodyObj);
+        debug(`Final request body:`, requestBodyObj);
 
         // Display test info
         console.clear();
@@ -191,20 +370,31 @@ async function main() {
         console.log(`📝 Prompt ID    : ${selectedPrompt.id} - ${selectedPrompt.name}`);
         console.log(`📄 Prompt       : "${selectedPrompt.prompt.substring(0, 50)}${selectedPrompt.prompt.length > 50 ? '...' : ''}"`);
         console.log(`📊 Mode         : ${isStream ? 'STREAM' : 'NON-STREAM'}`);
-        console.log(`🎯 Parameters   : ${presetUsed}`);
-        console.log(`   🌡️  Temperature : ${params.temperature?.toFixed(2)}`);
-        console.log(`   🔄 Repeat Penalty : ${params.repeat_penalty?.toFixed(2)}`);
-        console.log(`   📊 Top-K     : ${params.top_k} | Top-P: ${params.top_p?.toFixed(2)}`);
+        console.log(`🎯 Parameters   : ${includeParams ? presetUsed : 'NOT INCLUDED'}`);
+        if (includeParams) {
+            console.log(`   🌡️  Temperature : ${params.temperature?.toFixed(2)}`);
+            console.log(`   🔄 Repeat Penalty : ${params.repeat_penalty?.toFixed(2)}`);
+            console.log(`   📊 Top-K     : ${params.top_k} | Top-P: ${params.top_p?.toFixed(2)}`);
+            console.log(`   📏 Min-P     : ${params.min_p?.toFixed(3)}`);
+        }
         console.log(`💾 System       : ${os.cpus().length} cores | ${(os.totalmem() / 1024 / 1024 / 1024).toFixed(1)}GB RAM`);
         console.log('═'.repeat(70));
-        console.log('═'.repeat(60));
+        console.log('⌨️  Press Ctrl+C to cancel');
+        console.log('═'.repeat(70));
+        console.log('\n📤 REQUEST BODY:');
+        console.log('─'.repeat(70));
+        console.log(JSON.stringify(JSON.parse(requestBody), null, 2));
+        console.log('─'.repeat(70));
         console.log('');
 
         // Execute test
         runTest(requestBody);
 
     } catch (err) {
-        console.error('❌ Error:', err.message);
+        if (err.message !== 'Invalid prompt selection' && !isShuttingDown) {
+            debug(`Unhandled error in main:`, err);
+            console.error('❌ Error:', err.message);
+        }
         process.exit(1);
     }
 }
@@ -214,6 +404,19 @@ function runTest(body) {
     let ttftMs = null;
     let fullResponse = '';
     let tokenCount = 0;
+    let isCompleted = false;
+
+    debug(`Making HTTP request to http://localhost:8000/v1/chat/completions`);
+    debug(`Headers:`, {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'Connection': 'keep-alive'
+    });
+    debug(`Request method: POST`);
+    debug(`Stream mode: ${isStream}`);
+    if (isDebug) {
+        debug(`Sending request body (${Buffer.byteLength(body)} bytes)`);
+    }
 
     const req = http.request('http://localhost:8000/v1/chat/completions', {
         method: 'POST',
@@ -221,13 +424,33 @@ function runTest(body) {
             'Content-Type': 'application/json',
             'Content-Length': Buffer.byteLength(body),
             'Connection': 'keep-alive'
-        }
+        },
+        timeout: 900000 // 15 minute timeout
     }, (res) => {
+        if (isShuttingDown) {
+            res.destroy();
+            return;
+        }
+
+        debug(`Response Status: ${res.statusCode}`);
+        debug(`Response Headers:`, res.headers);
+
         if (isStream) {
             console.log('=== LIVE STREAMING ===\n');
 
             let buffer = '';
+            let chunkCount = 0;
             res.on('data', (chunk) => {
+                if (isShuttingDown) {
+                    res.destroy();
+                    return;
+                }
+
+                chunkCount++;
+                if (isDebug) {
+                    debug(`Received chunk #${chunkCount} (${chunk.length} bytes)`);
+                }
+
                 buffer += chunk.toString();
                 const lines = buffer.split('\n');
                 buffer = lines.pop();
@@ -235,15 +458,24 @@ function runTest(body) {
                 lines.forEach(line => {
                     if (line.trim().startsWith('data: ')) {
                         const data = line.slice(6);
-                        if (data === '[DONE]') return;
+                        if (data === '[DONE]') {
+                            debug(`Stream completion signal received`);
+                            return;
+                        }
                         
                         try {
                             const json = JSON.parse(data);
                             const delta = json.choices?.[0]?.delta;
+                            
+                            // Check for both content and reasoning_content
                             const content = delta?.content;
+                            const reasoningContent = delta?.reasoning_content;
                             
                             if (content) {
                                 tokenCount++;
+                                if (isDebug) {
+                                    debug(`Token #${tokenCount}:`, JSON.stringify(content));
+                                }
                                 if (ttftMs === null) {
                                     ttftMs = Date.now() - globalStart;
                                     console.log(`⏱️  TTFT: ${(ttftMs / 1000).toFixed(3)}s`);
@@ -253,13 +485,28 @@ function runTest(body) {
                                 }
                                 process.stdout.write(content);
                                 fullResponse += content;
+                            } else if (reasoningContent) {
+                                // Display reasoning content if flag enabled
+                                if (showReasoning) {
+                                    process.stdout.write(`[THINKING: ${reasoningContent}]`);
+                                }
+                                if (isDebug) {
+                                    debug(`Reasoning:`, JSON.stringify(reasoningContent));
+                                }
                             }
-                        } catch (e) {}
+                        } catch (e) {
+                            debug(`Error parsing stream data:`, e.message);
+                            // Silently ignore JSON parse errors
+                        }
                     }
                 });
             });
 
             res.on('end', () => {
+                if (isCompleted || isShuttingDown) return;
+                isCompleted = true;
+                debug(`Stream ended`);
+
                 const totalMs = Date.now() - globalStart;
                 console.log('\n\n' + '='.repeat(70));
                 console.log(`⏱️  Time to First Token : ${(ttftMs / 1000).toFixed(3)}s`);
@@ -267,18 +514,45 @@ function runTest(body) {
                 console.log(`🔢 Total Output Length : ${fullResponse.length} characters`);
                 console.log(`📈 Tokens Generated    : ${tokenCount}`);
                 console.log('='.repeat(70));
+                console.log('✅ Test completed successfully\n');
+                process.exit(0);
+            });
+
+            res.on('error', (err) => {
+                if (!isShuttingDown && !isCompleted) {
+                    console.error('\n❌ Response error:', err.message);
+                }
             });
         } else {
             let buffer = '';
+            let chunkCount = 0;
+            let firstDataTime = null;
             res.on('data', (chunk) => {
+                if (isShuttingDown) {
+                    res.destroy();
+                    return;
+                }
+                chunkCount++;
+                if (firstDataTime === null) {
+                    firstDataTime = Date.now() - globalStart;
+                    debug(`First data chunk received after ${(firstDataTime / 1000).toFixed(3)}s`);
+                }
+                if (isDebug) {
+                    debug(`Received chunk #${chunkCount} (${chunk.length} bytes)`);
+                }
                 buffer += chunk.toString();
             });
 
             res.on('end', () => {
+                if (isCompleted || isShuttingDown) return;
+                isCompleted = true;
+                debug(`Response complete, total size: ${buffer.length} bytes`);
+
                 const totalMs = Date.now() - globalStart;
 
                 try {
                     const response = JSON.parse(buffer);
+                    debug(`Parsed response:`, response);
                     const message = response.choices?.[0]?.message;
                     const responseText = message?.content || '';
                     const usage = response.usage || {};
@@ -310,21 +584,56 @@ function runTest(body) {
                     }
                         
                     console.log('\n' + '='.repeat(70));
+                    console.log('✅ Test completed successfully\n');
+                    process.exit(0);
                 } catch (e) {
-                    console.error('❌ Failed to parse response:', e.message);
-                    console.log('Raw response:', buffer);
+                    if (!isShuttingDown) {
+                        debug(`Failed to parse response:`, e);
+                        console.error('❌ Failed to parse response:', e.message);
+                        console.log('Raw response:', buffer.substring(0, 500));
+                    }
+                    process.exit(1);
+                }
+            });
+
+            res.on('error', (err) => {
+                if (!isShuttingDown && !isCompleted) {
+                    console.error('\n❌ Response error:', err.message);
                 }
             });
         }
     });
 
+    // Store reference to active request for cleanup
+    activeRequest = req;
+
     req.on('error', (e) => {
-        console.error(`❌ Error: ${e.message}`);
-        process.exit(1);
+        if (!isShuttingDown && !isCompleted) {
+            debug(`Request error:`, e);
+            console.error(`\n❌ Request error: ${e.message}`);
+            process.exit(1);
+        }
     });
 
-    req.write(body);
-    req.end();
+    req.on('timeout', () => {
+        if (!isShuttingDown && !isCompleted) {
+            debug(`Request timeout after 15 minutes`);
+            console.error('\n❌ Request timeout (15 minutes exceeded)');
+            req.destroy();
+            process.exit(1);
+        }
+    });
+
+    try {
+        req.write(body);
+        req.end();
+    } catch (e) {
+        if (!isShuttingDown) {
+            debug(`Error sending request:`, e);
+            console.error('❌ Failed to send request:', e.message);
+            process.exit(1);
+        }
+    }
 }
 
 // Start the test
