@@ -170,16 +170,17 @@ async function main() {
             presetUsed = presetName + ' (override)';
         }
 
-        // Build request body (no model field - uses server's loaded model)
+        // Build request body using chat completions API
         const requestBody = JSON.stringify({
-            prompt: selectedPrompt.prompt,
+            model: modelName,
+            messages: [
+                { role: "user", content: selectedPrompt.prompt }
+            ],
             stream: isStream,
-            n_predict: params.n_predict || 512,
+            max_tokens: params.n_predict || 512,
             temperature: params.temperature !== undefined ? params.temperature : 0.3,
             top_k: params.top_k || 40,
-            top_p: params.top_p || 0.9,
-            repeat_penalty: params.repeat_penalty || 1.1,
-            repeat_last_n: params.repeat_last_n || 64
+            top_p: params.top_p || 0.9
         });
 
         // Display test info
@@ -214,7 +215,7 @@ function runTest(body) {
     let fullResponse = '';
     let tokenCount = 0;
 
-    const req = http.request('http://localhost:8000/completion', {
+    const req = http.request('http://localhost:8000/v1/chat/completions', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -232,21 +233,26 @@ function runTest(body) {
                 buffer = lines.pop();
 
                 lines.forEach(line => {
-                    if (line.trim()) {
-                        tokenCount++;
-                        if (ttftMs === null) {
-                            ttftMs = Date.now() - globalStart;
-                            console.log(`⏱️  TTFT: ${(ttftMs / 1000).toFixed(3)}s`);
-                            if (ttftMs < 1000) {
-                                console.log('✅ OPTIMIZED! Fast response detected\n');
-                            }
-                        }
+                    if (line.trim().startsWith('data: ')) {
+                        const data = line.slice(6);
+                        if (data === '[DONE]') return;
+                        
                         try {
-                            const json = JSON.parse(line);
-                            const text = json.response || json.content;
-                            if (text) {
-                                process.stdout.write(text);
-                                fullResponse += text;
+                            const json = JSON.parse(data);
+                            const delta = json.choices?.[0]?.delta;
+                            const content = delta?.content;
+                            
+                            if (content) {
+                                tokenCount++;
+                                if (ttftMs === null) {
+                                    ttftMs = Date.now() - globalStart;
+                                    console.log(`⏱️  TTFT: ${(ttftMs / 1000).toFixed(3)}s`);
+                                    if (ttftMs < 1000) {
+                                        console.log('✅ OPTIMIZED! Fast response detected\n');
+                                    }
+                                }
+                                process.stdout.write(content);
+                                fullResponse += content;
                             }
                         } catch (e) {}
                     }
@@ -269,44 +275,45 @@ function runTest(body) {
             });
 
             res.on('end', () => {
-                const lines = buffer.trim().split('\n');
-                const lastLine = JSON.parse(lines[lines.length - 1]);
-
                 const totalMs = Date.now() - globalStart;
 
-                console.log('=== NON-STREAM RESPONSE ===\n');
-                console.log(`Server Metrics:`);
-                
-                if (lastLine.timings) {
-                    const loadMs = lastLine.timings.prompt_ms || 0;
-                    const evalMs = lastLine.timings.predicted_ms || 0;
-                    const predictedTokens = lastLine.tokens_predicted || 0;
+                try {
+                    const response = JSON.parse(buffer);
+                    const message = response.choices?.[0]?.message;
+                    const responseText = message?.content || '';
+                    const usage = response.usage || {};
+
+                    console.log('=== NON-STREAM RESPONSE ===\n');
+                    console.log(`Server Metrics:`);
                     
-                    if (predictedTokens > 0 && evalMs > 0) {
-                        const evalSpeed = (predictedTokens / (evalMs / 1000));
-                        console.log(`  Prompt Process  : ${loadMs.toFixed(0)}ms`);
-                        console.log(`  Prediction Time : ${evalMs.toFixed(0)}ms`);
-                        console.log(`  Token Speed     : ${evalSpeed.toFixed(1)} tokens/sec`);
-                        console.log(`  Tokens Gen      : ${predictedTokens}`);
-                        
-                        if (evalSpeed > 40) {
-                            console.log(`\n✅ GPU is active! (${evalSpeed.toFixed(0)} tokens/sec)`);
+                    if (usage.completion_tokens && usage.prompt_tokens) {
+                        console.log(`  Prompt Tokens   : ${usage.prompt_tokens}`);
+                        console.log(`  Completion Tokens : ${usage.completion_tokens}`);
+                        if (totalMs > 0) {
+                            const tokensPerSec = (usage.completion_tokens / (totalMs / 1000));
+                            console.log(`  Token Speed     : ${tokensPerSec.toFixed(1)} tokens/sec`);
+                            
+                            if (tokensPerSec > 40) {
+                                console.log(`\n✅ GPU is active! (${tokensPerSec.toFixed(0)} tokens/sec)`);
+                            }
                         }
                     }
-                }
-                
-                console.log(`\nClient Metrics:`);
-                console.log(`  Total Request : ${(totalMs / 1000).toFixed(3)}s`);
-                
-                const responseText = lastLine.response || lastLine.content;
-                if (responseText) {
-                    console.log(`\n📄 Full Response (${responseText.length} chars):`);
-                    console.log('─'.repeat(70));
-                    console.log(responseText);
-                    console.log('─'.repeat(70));
-                }
                     
-                console.log('\n' + '='.repeat(70));
+                    console.log(`\nClient Metrics:`);
+                    console.log(`  Total Request : ${(totalMs / 1000).toFixed(3)}s`);
+                    
+                    if (responseText) {
+                        console.log(`\n📄 Full Response (${responseText.length} chars):`);
+                        console.log('─'.repeat(70));
+                        console.log(responseText);
+                        console.log('─'.repeat(70));
+                    }
+                        
+                    console.log('\n' + '='.repeat(70));
+                } catch (e) {
+                    console.error('❌ Failed to parse response:', e.message);
+                    console.log('Raw response:', buffer);
+                }
             });
         }
     });
