@@ -174,6 +174,15 @@ function Display-ModelParameters {
         Write-Host "  Flash Attention: Enabled" -ForegroundColor White
     }
     
+    # Display optional vision/template parameters
+    if ($Model.parameters.PSObject.Properties.Name -contains "mmproj" -and -not [string]::IsNullOrWhiteSpace($Model.parameters.mmproj)) {
+        Write-Host "  Vision Model:    Enabled (mmproj)" -ForegroundColor White
+    }
+    
+    if ($Model.parameters.PSObject.Properties.Name -contains "chat_template_file" -and -not [string]::IsNullOrWhiteSpace($Model.parameters.chat_template_file)) {
+        Write-Host "  Chat Template:   Custom ($([System.IO.Path]::GetFileName($Model.parameters.chat_template_file)))" -ForegroundColor White
+    }
+    
     Write-Host ""
 }
 
@@ -203,6 +212,51 @@ function Start-LlamaServer {
         "--repeat-penalty", $Parameters.repeat_penalty,
         "--top-k", $Parameters.top_k
     )
+    
+    # Handle chat_template_file parameter
+    if ($Parameters.PSObject.Properties.Name -contains "chat_template_file") {
+        if (-not [string]::IsNullOrWhiteSpace($Parameters.chat_template_file)) {
+            if (Test-Path $Parameters.chat_template_file) {
+                $arguments += "--chat-template", $Parameters.chat_template_file
+                Write-Host "[INFO] Using chat template: $($Parameters.chat_template_file)" -ForegroundColor Cyan
+            }
+            else {
+                Write-Host "[WARN] chat_template_file specified but not found: $($Parameters.chat_template_file)" -ForegroundColor Yellow
+            }
+        }
+    }
+    
+    # Handle mmproj parameter for vision models
+    if ($Parameters.PSObject.Properties.Name -contains "mmproj") {
+        if (-not [string]::IsNullOrWhiteSpace($Parameters.mmproj)) {
+            if (Test-Path $Parameters.mmproj) {
+                $arguments += "--mmproj", $Parameters.mmproj
+                Write-Host "[INFO] Using vision projector: $($Parameters.mmproj)" -ForegroundColor Cyan
+            }
+            else {
+                Write-Host "[WARN] mmproj file specified but not found: $($Parameters.mmproj)" -ForegroundColor Yellow
+            }
+        }
+    }
+    
+    # Handle jinja flag
+    if ($Parameters.PSObject.Properties.Name -contains "jinja" -and $Parameters.jinja -eq $true) {
+        $arguments += "--jinja"
+    }
+    
+    # Handle cache type parameters
+    if ($Parameters.PSObject.Properties.Name -contains "cache_type_k" -and -not [string]::IsNullOrWhiteSpace($Parameters.cache_type_k)) {
+        $arguments += "--cache-type-k", $Parameters.cache_type_k
+    }
+    
+    if ($Parameters.PSObject.Properties.Name -contains "cache_type_v" -and -not [string]::IsNullOrWhiteSpace($Parameters.cache_type_v)) {
+        $arguments += "--cache-type-v", $Parameters.cache_type_v
+    }
+    
+    # Handle no_context_shift flag
+    if ($Parameters.PSObject.Properties.Name -contains "no_context_shift" -and $Parameters.no_context_shift -eq $true) {
+        $arguments += "--no-context-shift"
+    }
     
     if ($Parameters.flash_attn) {
         $arguments += "--flash-attn", "1"
