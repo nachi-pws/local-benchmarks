@@ -215,7 +215,27 @@ class LlamaServerManager {
                     if (VERBOSE_SERVER_OUTPUT) {
                         console.log(`   Waiting additional ${this.startupDelay}ms for model loading...`);
                     }
-                  url = `http://${this.host}:${this.port}${this.healthEndpoint}`;
+                    await this.sleep(this.startupDelay);
+                    return;
+                }
+                if (VERBOSE_SERVER_OUTPUT && i % 5 === 0) {
+                    console.log('not ready');
+                }
+            } catch (e) {
+                // Server not ready yet
+                if (VERBOSE_SERVER_OUTPUT && i % 5 === 0) {
+                    console.log(`error: ${e.message}`);
+                }
+            }
+            await this.sleep(interval);
+        }
+        
+        throw new Error('Server failed to start within timeout period');
+    }
+    
+    async healthCheck() {
+        return new Promise((resolve) => {
+            const url = `http://${this.host}:${this.port}${this.healthEndpoint}`;
             
             const req = http.get(url, (res) => {
                 let data = '';
@@ -239,27 +259,7 @@ class LlamaServerManager {
             req.setTimeout(this.healthTimeout, () => {
                 if (VERBOSE_SERVER_OUTPUT) {
                     console.log(`   Health check timeout after ${this.healthTimeout}ms`);
-                } 0) {
-                    console.log(`error: ${e.message}`);
                 }
-            }
-            await this.sleep(interval);
-        }
-        
-        throw new Error('Server failed to start within timeout period');
-    }
-    
-    async healthCheck() {
-        return new Promise((resolve) => {
-            const req = http.get(`http://${this.host}:${this.port}${this.healthEndpoint}`, (res) => {
-                resolve(res.statusCode === 200);
-            });
-            
-            req.on('error', () => {
-                resolve(false);
-            });
-            
-            req.setTimeout(this.healthTimeout, () => {
                 req.destroy();
                 resolve(false);
             });
