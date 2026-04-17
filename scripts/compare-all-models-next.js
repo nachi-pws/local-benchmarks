@@ -11,6 +11,12 @@ import { parse as parseJsonc } from 'jsonc-parser';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ============================================================================
+// CONFIGURATION
+// ============================================================================
+
+const VERBOSE_SERVER_OUTPUT = true;  // Set to false to suppress server logs
+
+// ============================================================================
 // CONFIGURATION LOADER - JSONC Support
 // ============================================================================
 
@@ -93,6 +99,8 @@ class LlamaServerManager {
         this.port = launchConfig.server?.port || 8000;
         this.host = launchConfig.server?.host || '127.0.0.1';
         this.startupDelay = launchConfig.server?.startup_delay_ms || 30000;
+        this.healthEndpoint = launchConfig.server?.health_check_endpoint || '/health';
+        this.healthTimeout = launchConfig.server?.health_check_timeout_ms || 3000;
     }
     
     async launch(model, serverVersion) {
@@ -136,6 +144,11 @@ class LlamaServerManager {
         console.log(`   Model: ${model.name}`);
         console.log(`   Port: ${this.port}`);
         
+        if (VERBOSE_SERVER_OUTPUT) {
+            console.log(`\n📋 Command: ${serverPath}`);
+            console.log(`   Args: ${args.join(' ')}\n`);
+        }
+        
         // Spawn the server process
         this.process = spawn(serverPath, args, {
             stdio: ['ignore', 'pipe', 'pipe']
@@ -143,12 +156,17 @@ class LlamaServerManager {
         
         // Log server output for debugging
         this.process.stdout.on('data', (data) => {
-            // Suppress verbose output, only log errors
+            if (VERBOSE_SERVER_OUTPUT) {
+                console.log('[SERVER STDOUT]', data.toString().trim());
+            }
         });
         
         this.process.stderr.on('data', (data) => {
-            // Check for ready signal
             const output = data.toString();
+            if (VERBOSE_SERVER_OUTPUT) {
+                console.log('[SERVER STDERR]', output.trim());
+            }
+            // Check for ready signal
             if (output.includes('HTTP server listening')) {
                 // Server is ready
             }
@@ -156,6 +174,15 @@ class LlamaServerManager {
         
         this.process.on('error', (err) => {
             console.error('❌ Server process error:', err.message);
+        });
+        
+        this.process.on('exit', (code, signal) => {
+            if (code !== null && code !== 0) {
+                console.error(`❌ Server exited with code ${code}`);
+            }
+            if (signal) {
+                console.log(`⚠️  Server killed with signal ${signal}`);
+            }
         });
         
         // Wait for server to be ready
@@ -167,18 +194,54 @@ class LlamaServerManager {
         const interval = launchConfig.server?.attempt_interval_ms || 2000;
         
         console.log(`⏳ Waiting for server to be ready (max ${maxAttempts * interval / 1000}s)...`);
+        if (VERBOSE_SERVER_OUTPUT) {
+            console.log(`   Health endpoint: ${this.healthEndpoint}`);
+            console.log(`   Checking every ${interval}ms, max ${maxAttempts} attempts\n`);
+        }
         
         for (let i = 0; i < maxAttempts; i++) {
+            if (VERBOSE_SERVER_OUTPUT && i % 5 === 0) {
+                process.stdout.write(`   Attempt ${i + 1}/${maxAttempts}... `);
+            }
+            
             try {
                 const isReady = await this.healthCheck();
                 if (isReady) {
-                    console.log(`✅ Server is ready!`);
+                    if (VERBOSE_SERVER_OUTPUT) {
+                        console.log('ready! ✓');
+                    }
+                    console.log(`✅ Server is ready (attempt ${i + 1})!`);
                     // Additional startup delay for model loading
-                    await this.sleep(this.startupDelay);
-                    return;
+                    if (VERBOSE_SERVER_OUTPUT) {
+                        console.log(`   Waiting additional ${this.startupDelay}ms for model loading...`);
+                    }
+                  url = `http://${this.host}:${this.port}${this.healthEndpoint}`;
+            
+            const req = http.get(url, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                    const success = res.statusCode === 200;
+                    if (VERBOSE_SERVER_OUTPUT && success) {
+                        console.log(`   Health check response (${res.statusCode}):`, data.substring(0, 200));
+                    }
+                    resolve(success);
+                });
+            });
+            
+            req.on('error', (err) => {
+                if (VERBOSE_SERVER_OUTPUT) {
+                    console.log(`   Health check error: ${err.code || err.message}`);
                 }
-            } catch (e) {
-                // Server not ready yet
+                resolve(false);
+            });
+            
+            req.setTimeout(this.healthTimeout, () => {
+                if (VERBOSE_SERVER_OUTPUT) {
+                    console.log(`   Health check timeout after ${this.healthTimeout}ms`);
+                } 0) {
+                    console.log(`error: ${e.message}`);
+                }
             }
             await this.sleep(interval);
         }
@@ -188,7 +251,7 @@ class LlamaServerManager {
     
     async healthCheck() {
         return new Promise((resolve) => {
-            const req = http.get(`http://${this.host}:${this.port}/health`, (res) => {
+            const req = http.get(`http://${this.host}:${this.port}${this.healthEndpoint}`, (res) => {
                 resolve(res.statusCode === 200);
             });
             
@@ -196,7 +259,7 @@ class LlamaServerManager {
                 resolve(false);
             });
             
-            req.setTimeout(3000, () => {
+            req.setTimeout(this.healthTimeout, () => {
                 req.destroy();
                 resolve(false);
             });
