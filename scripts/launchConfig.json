@@ -2,10 +2,10 @@
   "llamaServerVersions": {
     "default": "b8665",
     "available": {
-      "HIP-b8662": {
-        "path": "D:\\Llama-Server-Exes\\llama-b8662-bin-win-hip-radeon-x64\\llama-server.exe",
-        "label": "Build 8662 (HIP Radeon) - DEPRECATED: GPU unused on Strix Halo Windows"
-      },
+      // "HIP-b8662": {
+      //   "path": "D:\\Llama-Server-Exes\\llama-b8662-bin-win-hip-radeon-x64\\llama-server.exe",
+      //   "label": "Build 8662 (HIP Radeon) - DEPRECATED: GPU unused on Strix Halo Windows"
+      // },
       "HIP-b8665": {
         "path": "D:\\Llama-Server-Exes\\llama-b8665-bin-win-hip-radeon-x64\\llama-server.exe",
         "label": "Build 8665 (HIP Radeon) - DEPRECATED: GPU unused on Strix Halo Windows"
@@ -297,8 +297,8 @@
     {
       "id": 9,
       "name": "Qwen3-Coder-Next-UD-Q5_K_M",
-      "filename": "Qwen3-Coder-Next-UD-Q5_K_M.gguf",
-      "path": "D:\\Large-Lang-Models\\qwen-coder-next\\Qwen3-Coder-Next-UD-Q5_K_M.gguf",
+      "filename": "Qwen3-Coder-Next-UD-Q5_K_M-00001-of-00003.gguf",
+      "path": "D:\\Large-Lang-Models\\qwen-coder-next\\Qwen3-Coder-Next-UD-Q5_K_M-00001-of-00003.gguf",
       "description": "Qwen3 Coder Next 80B MoE (3B active) - Agentic coding with long-horizon reasoning, tool-calling, and execution recovery. Fast code generation with 256K native context.",
       "url": "https://huggingface.co/unsloth/Qwen3-Coder-Next-GGUF",
       "notes": [

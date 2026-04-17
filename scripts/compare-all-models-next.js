@@ -1,0 +1,663 @@
+#!/usr/bin/env node
+
+import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
+import readline from 'readline';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// ============================================================================
+// CONFIGURATION LOADER
+// ============================================================================
+
+// Strip comments from JSON (supports // and /* */ style comments)
+function stripJsonComments(jsonString) {
+    // Remove single-line comments
+    let result = jsonString.replace(/\/\/.*$/gm, '');
+    // Remove multi-line comments
+    result = result.replace(/\/\*[\s\S]*?\*\//g, '');
+    return result;
+}
+
+function loadJsonWithComments(filepath) {
+    const data = fs.readFileSync(filepath, 'utf8');
+    const stripped = stripJsonComments(data);
+    return JSON.parse(stripped);
+}
+
+let launchConfig = {};
+let promptConfig = {};
+
+try {
+    launchConfig = loadJsonWithComments(path.join(__dirname, 'launchConfig.json'));
+    promptConfig = loadJsonWithComments(path.join(__dirname, 'promptConfig.json'));
+} catch (e) {
+    console.error('❌ Failed to load configuration files:', e.message);
+    process.exit(1);
+}
+
+// ============================================================================
+// PROMPT SELECTION UI
+// ============================================================================
+
+function displayPrompts() {
+    console.log('\n' + '═'.repeat(80));
+    console.log('📝 AVAILABLE PROMPTS');
+    console.log('═'.repeat(80) + '\n');
+    
+    promptConfig.prompts.forEach(p => {
+        const preview = p.prompt.length > 60 
+            ? p.prompt.substring(0, 60) + '...' 
+            : p.prompt;
+        console.log(`  [${p.id}] ${p.name}`);
+        console.log(`      Category: ${p.category} | Length: ${p.length}`);
+        console.log(`      Preview: "${preview}"`);
+        console.log('');
+    });
+}
+
+async function selectPrompt() {
+    displayPrompts();
+    
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+    
+    return new Promise((resolve) => {
+        rl.question('Select prompt ID (1-' + promptConfig.prompts.length + '): ', (answer) => {
+            rl.close();
+            const promptId = parseInt(answer);
+            const selectedPrompt = promptConfig.prompts.find(p => p.id === promptId);
+            
+            if (!selectedPrompt) {
+                console.error('❌ Invalid prompt ID');
+                process.exit(1);
+            }
+            
+            resolve(selectedPrompt);
+        });
+    });
+}
+
+// ============================================================================
+// LLAMA-SERVER LIFECYCLE MANAGEMENT
+// ============================================================================
+
+class LlamaServerManager {
+    constructor() {
+        this.process = null;
+        this.port = launchConfig.server?.port || 8000;
+        this.host = launchConfig.server?.host || '127.0.0.1';
+        this.startupDelay = launchConfig.server?.startup_delay_ms || 30000;
+    }
+    
+    async launch(model, serverVersion) {
+        const serverInfo = launchConfig.llamaServerVersions.available[serverVersion];
+        if (!serverInfo) {
+            throw new Error(`Server version ${serverVersion} not found in config`);
+        }
+        
+        const serverPath = serverInfo.path;
+        const params = model.parameters;
+        
+        // Build command line arguments
+        const args = [
+            '--model', model.path,
+            '--port', this.port.toString(),
+            '--host', this.host,
+            '--ctx-size', params.ctx_size?.toString() || '32768',
+            '--n-gpu-layers', params.n_gpu_layers?.toString() || '99',
+            '--threads', params.n_threads?.toString() || '8',
+        ];
+        
+        // Optional parameters
+        if (params.flash_attn) args.push('--flash-attn');
+        if (params.jinja) args.push('--jinja');
+        if (params.no_context_shift) args.push('--no-context-shift');
+        if (params.cache_type_k) {
+            args.push('--cache-type-k', params.cache_type_k);
+        }
+        if (params.cache_type_v) {
+            args.push('--cache-type-v', params.cache_type_v);
+        }
+        if (params.chat_template_file) {
+            args.push('--chat-template', params.chat_template_file);
+        }
+        if (params.mmproj && params.mmproj !== '') {
+            args.push('--mmproj', params.mmproj);
+        }
+        
+        console.log(`🚀 Launching llama-server...`);
+        console.log(`   Server: ${serverVersion}`);
+        console.log(`   Model: ${model.name}`);
+        console.log(`   Port: ${this.port}`);
+        
+        // Spawn the server process
+        this.process = spawn(serverPath, args, {
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+        
+        // Log server output for debugging
+        this.process.stdout.on('data', (data) => {
+            // Suppress verbose output, only log errors
+        });
+        
+        this.process.stderr.on('data', (data) => {
+            // Check for ready signal
+            const output = data.toString();
+            if (output.includes('HTTP server listening')) {
+                // Server is ready
+            }
+        });
+        
+        this.process.on('error', (err) => {
+            console.error('❌ Server process error:', err.message);
+        });
+        
+        // Wait for server to be ready
+        await this.waitForReady();
+    }
+    
+    async waitForReady() {
+        const maxAttempts = launchConfig.server?.max_wait_attempts || 60;
+        const interval = launchConfig.server?.attempt_interval_ms || 2000;
+        
+        console.log(`⏳ Waiting for server to be ready (max ${maxAttempts * interval / 1000}s)...`);
+        
+        for (let i = 0; i < maxAttempts; i++) {
+            try {
+                const isReady = await this.healthCheck();
+                if (isReady) {
+                    console.log(`✅ Server is ready!`);
+                    // Additional startup delay for model loading
+                    await this.sleep(this.startupDelay);
+                    return;
+                }
+            } catch (e) {
+                // Server not ready yet
+            }
+            await this.sleep(interval);
+        }
+        
+        throw new Error('Server failed to start within timeout period');
+    }
+    
+    async healthCheck() {
+        return new Promise((resolve) => {
+            const req = http.get(`http://${this.host}:${this.port}/health`, (res) => {
+                resolve(res.statusCode === 200);
+            });
+            
+            req.on('error', () => {
+                resolve(false);
+            });
+            
+            req.setTimeout(3000, () => {
+                req.destroy();
+                resolve(false);
+            });
+        });
+    }
+    
+    async shutdown() {
+        if (!this.process) return;
+        
+        console.log('🛑 Shutting down llama-server...');
+        
+        return new Promise((resolve) => {
+            this.process.on('exit', () => {
+                this.process = null;
+                console.log('✅ Server stopped');
+                resolve();
+            });
+            
+            // Try graceful shutdown first
+            this.process.kill('SIGTERM');
+            
+            // Force kill after 5 seconds if still running
+            setTimeout(() => {
+                if (this.process) {
+                    console.log('⚠️  Force killing server...');
+                    this.process.kill('SIGKILL');
+                    this.process = null;
+                    resolve();
+                }
+            }, 5000);
+        });
+    }
+    
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+}
+
+// ============================================================================
+// MODEL TESTING ENGINE
+// ============================================================================
+
+class ModelTester {
+    constructor(port, host) {
+        this.port = port;
+        this.host = host;
+    }
+    
+    async testModel(model, prompt) {
+        const params = model.parameters;
+        
+        const body = JSON.stringify({
+            prompt: prompt.prompt,
+            stream: true,  // Always use streaming to capture TTFT
+            n_predict: params.n_predict || -1,
+            temperature: params.temperature || 0.7,
+            top_k: params.top_k || 40,
+            top_p: params.top_p || 0.9,
+            min_p: params.min_p || 0.0,
+            repeat_penalty: params.repeat_penalty || 1.0,
+        });
+        
+        console.log(`\n🧪 Testing: ${model.name}`);
+        console.log(`   Prompt: "${prompt.name}" (${prompt.prompt.length} chars)`);
+        
+        const result = {
+            modelId: model.id,
+            modelName: model.name,
+            filename: model.filename,
+            promptId: prompt.id,
+            promptName: prompt.name,
+            promptLength: prompt.prompt.length,
+            ttftMs: null,
+            totalMs: null,
+            responseLength: 0,
+            tokenCount: 0,
+            success: false,
+            error: null,
+            response: ''
+        };
+        
+        const globalStart = Date.now();
+        
+        try {
+            await new Promise((resolve, reject) => {
+                const req = http.request(`http://${this.host}:${this.port}/completion`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Content-Length': Buffer.byteLength(body),
+                        'Connection': 'keep-alive'
+                    },
+                    timeout: 300000  // 5 minute timeout
+                }, (res) => {
+                    let buffer = '';
+                    
+                    res.on('data', (chunk) => {
+                        buffer += chunk.toString();
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop();
+                        
+                        lines.forEach(line => {
+                            if (line.trim()) {
+                                result.tokenCount++;
+                                
+                                // Capture TTFT on first token
+                                if (result.ttftMs === null) {
+                                    result.ttftMs = Date.now() - globalStart;
+                                    process.stdout.write(`   ⏱️  TTFT: ${(result.ttftMs / 1000).toFixed(3)}s | Streaming: `);
+                                }
+                                
+                                try {
+                                    const json = JSON.parse(line);
+                                    const text = json.response || json.content || '';
+                                    if (text) {
+                                        result.response += text;
+                                        process.stdout.write('.');  // Progress indicator
+                                    }
+                                } catch (e) {
+                                    // Ignore parse errors
+                                }
+                            }
+                        });
+                    });
+                    
+                    res.on('end', () => {
+                        result.totalMs = Date.now() - globalStart;
+                        result.responseLength = result.response.length;
+                        result.success = true;
+                        console.log(''); // Newline after dots
+                        console.log(`   ✅ Total: ${(result.totalMs / 1000).toFixed(3)}s | ${result.responseLength} chars | ${result.tokenCount} tokens`);
+                        resolve();
+                    });
+                    
+                    res.on('error', (err) => {
+                        result.error = err.message;
+                        reject(err);
+                    });
+                });
+                
+                req.on('error', (err) => {
+                    result.error = err.message;
+                    reject(err);
+                });
+                
+                req.write(body);
+                req.end();
+            });
+        } catch (err) {
+            console.log(`   ❌ Error: ${err.message}`);
+            result.error = err.message;
+        }
+        
+        return result;
+    }
+}
+
+// ============================================================================
+// RESULTS REPORTER
+// ============================================================================
+
+class ResultsReporter {
+    constructor(results, selectedPrompt) {
+        this.results = results;
+        this.selectedPrompt = selectedPrompt;
+    }
+    
+    generateReport() {
+        console.log('\n\n' + '═'.repeat(100));
+        console.log('📊 COMPREHENSIVE BENCHMARK REPORT');
+        console.log('═'.repeat(100));
+        
+        console.log(`\n📝 Tested Prompt: ${this.selectedPrompt.name}`);
+        console.log(`   ID: ${this.selectedPrompt.id} | Category: ${this.selectedPrompt.category} | Length: ${this.selectedPrompt.length}`);
+        console.log(`   Prompt: "${this.selectedPrompt.prompt}"`);
+        console.log(`   Prompt Character Count: ${this.selectedPrompt.prompt.length}`);
+        
+        // Group results by server version
+        const byVersion = {};
+        this.results.forEach(r => {
+            if (!byVersion[r.serverVersion]) {
+                byVersion[r.serverVersion] = [];
+            }
+            byVersion[r.serverVersion].push(r);
+        });
+        
+        // Report by server version
+        Object.keys(byVersion).forEach(version => {
+            console.log('\n' + '─'.repeat(100));
+            console.log(`🖥️  SERVER VERSION: ${version}`);
+            console.log('─'.repeat(100));
+            
+            const versionResults = byVersion[version];
+            
+            // Sort by TTFT for this version
+            const sortedByTTFT = [...versionResults].sort((a, b) => {
+                if (!a.ttftMs) return 1;
+                if (!b.ttftMs) return -1;
+                return a.ttftMs - b.ttftMs;
+            });
+            
+            console.log('\n🏆 Ranking by Time to First Token (TTFT):');
+            sortedByTTFT.forEach((r, idx) => {
+                const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}.`;
+                const ttft = r.ttftMs ? `${(r.ttftMs / 1000).toFixed(3)}s` : 'N/A';
+                const total = r.totalMs ? `${(r.totalMs / 1000).toFixed(3)}s` : 'N/A';
+                const status = r.success ? '✅' : '❌';
+                console.log(`   ${medal} ${r.modelName.padEnd(35)} | TTFT: ${ttft.padStart(8)} | Total: ${total.padStart(8)} | ${r.responseLength} chars ${status}`);
+            });
+            
+            // Sort by total time
+            const sortedByTotal = [...versionResults].sort((a, b) => {
+                if (!a.totalMs) return 1;
+                if (!b.totalMs) return -1;
+                return a.totalMs - b.totalMs;
+            });
+            
+            console.log('\n⚡ Ranking by Total Response Time:');
+            sortedByTotal.forEach((r, idx) => {
+                const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}.`;
+                const total = r.totalMs ? `${(r.totalMs / 1000).toFixed(3)}s` : 'N/A';
+                const ttft = r.ttftMs ? `${(r.ttftMs / 1000).toFixed(3)}s` : 'N/A';
+                const status = r.success ? '✅' : '❌';
+                console.log(`   ${medal} ${r.modelName.padEnd(35)} | Total: ${total.padStart(8)} | TTFT: ${ttft.padStart(8)} | ${r.responseLength} chars ${status}`);
+            });
+            
+            // Statistics for this version
+            const successful = versionResults.filter(r => r.success);
+            if (successful.length > 0) {
+                const avgTTFT = successful.reduce((sum, r) => sum + r.ttftMs, 0) / successful.length;
+                const avgTotal = successful.reduce((sum, r) => sum + r.totalMs, 0) / successful.length;
+                const avgChars = successful.reduce((sum, r) => sum + r.responseLength, 0) / successful.length;
+                
+                console.log('\n📈 Statistics for this version:');
+                console.log(`   Average TTFT: ${(avgTTFT / 1000).toFixed(3)}s`);
+                console.log(`   Average Total Time: ${(avgTotal / 1000).toFixed(3)}s`);
+                console.log(`   Average Response Length: ${avgChars.toFixed(0)} characters`);
+                console.log(`   Success Rate: ${successful.length}/${versionResults.length} (${(successful.length / versionResults.length * 100).toFixed(1)}%)`);
+            }
+        });
+        
+        // Cross-version comparison for each model
+        console.log('\n' + '═'.repeat(100));
+        console.log('🔄 MODEL PERFORMANCE ACROSS SERVER VERSIONS');
+        console.log('═'.repeat(100));
+        
+        const byModel = {};
+        this.results.forEach(r => {
+            if (!byModel[r.modelName]) {
+                byModel[r.modelName] = [];
+            }
+            byModel[r.modelName].push(r);
+        });
+        
+        Object.keys(byModel).forEach(modelName => {
+            console.log(`\n📦 ${modelName}:`);
+            const modelResults = byModel[modelName];
+            modelResults.forEach(r => {
+                const ttft = r.ttftMs ? `${(r.ttftMs / 1000).toFixed(3)}s` : 'N/A';
+                const total = r.totalMs ? `${(r.totalMs / 1000).toFixed(3)}s` : 'N/A';
+                const status = r.success ? '✅' : '❌';
+                console.log(`   ${r.serverVersion.padEnd(20)} | TTFT: ${ttft.padStart(8)} | Total: ${total.padStart(8)} | ${r.responseLength} chars ${status}`);
+            });
+        });
+        
+        // Overall best performers
+        console.log('\n' + '═'.repeat(100));
+        console.log('🏆 OVERALL CHAMPIONS');
+        console.log('═'.repeat(100));
+        
+        const allSuccessful = this.results.filter(r => r.success);
+        
+        if (allSuccessful.length > 0) {
+            const fastestTTFT = [...allSuccessful].sort((a, b) => a.ttftMs - b.ttftMs)[0];
+            const fastestTotal = [...allSuccessful].sort((a, b) => a.totalMs - b.totalMs)[0];
+            const mostChars = [...allSuccessful].sort((a, b) => b.responseLength - a.responseLength)[0];
+            
+            console.log(`\n🥇 Fastest Time to First Token:`);
+            console.log(`   ${fastestTTFT.modelName} (${fastestTTFT.serverVersion})`);
+            console.log(`   TTFT: ${(fastestTTFT.ttftMs / 1000).toFixed(3)}s`);
+            
+            console.log(`\n🥇 Fastest Total Response:`);
+            console.log(`   ${fastestTotal.modelName} (${fastestTotal.serverVersion})`);
+            console.log(`   Total Time: ${(fastestTotal.totalMs / 1000).toFixed(3)}s`);
+            
+            console.log(`\n🥇 Most Comprehensive Response:`);
+            console.log(`   ${mostChars.modelName} (${mostChars.serverVersion})`);
+            console.log(`   Response Length: ${mostChars.responseLength} characters`);
+        }
+        
+        // Failures summary
+        const failures = this.results.filter(r => !r.success);
+        if (failures.length > 0) {
+            console.log('\n' + '═'.repeat(100));
+            console.log('❌ FAILURES');
+            console.log('═'.repeat(100));
+            failures.forEach(r => {
+                console.log(`\n   Model: ${r.modelName}`);
+                console.log(`   Server: ${r.serverVersion}`);
+                console.log(`   Error: ${r.error}`);
+            });
+        }
+        
+        console.log('\n' + '═'.repeat(100));
+        console.log('📊 REPORT COMPLETE');
+        console.log('═'.repeat(100) + '\n');
+    }
+    
+    saveToFile() {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `benchmark-report-${timestamp}.json`;
+        const filepath = path.join(__dirname, filename);
+        
+        const reportData = {
+            timestamp: new Date().toISOString(),
+            prompt: this.selectedPrompt,
+            results: this.results,
+            summary: this.generateSummary()
+        };
+        
+        fs.writeFileSync(filepath, JSON.stringify(reportData, null, 2));
+        console.log(`💾 Detailed results saved to: ${filename}\n`);
+    }
+    
+    generateSummary() {
+        const successful = this.results.filter(r => r.success);
+        return {
+            totalTests: this.results.length,
+            successful: successful.length,
+            failed: this.results.length - successful.length,
+            avgTTFT: successful.length > 0 
+                ? successful.reduce((sum, r) => sum + r.ttftMs, 0) / successful.length 
+                : null,
+            avgTotalTime: successful.length > 0
+                ? successful.reduce((sum, r) => sum + r.totalMs, 0) / successful.length
+                : null,
+            avgResponseLength: successful.length > 0
+                ? successful.reduce((sum, r) => sum + r.responseLength, 0) / successful.length
+                : null
+        };
+    }
+}
+
+// ============================================================================
+// MAIN ORCHESTRATOR
+// ============================================================================
+
+async function main() {
+    console.clear();
+    console.log('╔═══════════════════════════════════════════════════════════════════════════════╗');
+    console.log('║                    COMPREHENSIVE MODEL BENCHMARK SUITE                        ║');
+    console.log('║                  Multi-Model × Multi-Version Performance Analysis              ║');
+    console.log('╚═══════════════════════════════════════════════════════════════════════════════╝');
+    
+    // Step 1: Select prompt
+    const selectedPrompt = await selectPrompt();
+    console.log(`\n✅ Selected: ${selectedPrompt.name}\n`);
+    
+    // Step 2: Get server versions to test
+    const serverVersions = Object.keys(launchConfig.llamaServerVersions.available);
+    console.log('🖥️  Server versions to test:', serverVersions.join(', '));
+    
+    // Step 3: Get models to test
+    const models = launchConfig.models;
+    console.log(`📦 Models to test: ${models.length} models`);
+    
+    console.log(`\n⚡ Total combinations: ${models.length} models × ${serverVersions.length} versions = ${models.length * serverVersions.length} tests\n`);
+    
+    // Confirm before starting
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+    
+    await new Promise((resolve) => {
+        rl.question('Press ENTER to start benchmark (or Ctrl+C to cancel)... ', () => {
+            rl.close();
+            resolve();
+        });
+    });
+    
+    // Step 4: Run all tests
+    const serverManager = new LlamaServerManager();
+    const tester = new ModelTester(serverManager.port, serverManager.host);
+    const allResults = [];
+    
+    let testNumber = 0;
+    const totalTests = models.length * serverVersions.length;
+    
+    console.log('\n' + '═'.repeat(100));
+    console.log('🚀 STARTING BENCHMARK');
+    console.log('═'.repeat(100) + '\n');
+    
+    for (const serverVersion of serverVersions) {
+        console.log('\n' + '█'.repeat(100));
+        console.log(`🖥️  TESTING WITH SERVER VERSION: ${serverVersion}`);
+        console.log('█'.repeat(100));
+        
+        for (const model of models) {
+            testNumber++;
+            console.log(`\n[${testNumber}/${totalTests}] ════════════════════════════════════════════════════════════════`);
+            
+            try {
+                // Launch server with this model and version
+                await serverManager.launch(model, serverVersion);
+                
+                // Run test
+                const result = await tester.testModel(model, selectedPrompt);
+                result.serverVersion = serverVersion;
+                allResults.push(result);
+                
+                // Shutdown server
+                await serverManager.shutdown();
+                
+                // Brief pause between tests
+                await serverManager.sleep(3000);
+                
+            } catch (err) {
+                console.error(`❌ Test failed: ${err.message}`);
+                allResults.push({
+                    modelId: model.id,
+                    modelName: model.name,
+                    filename: model.filename,
+                    promptId: selectedPrompt.id,
+                    promptName: selectedPrompt.name,
+                    promptLength: selectedPrompt.prompt.length,
+                    serverVersion: serverVersion,
+                    ttftMs: null,
+                    totalMs: null,
+                    responseLength: 0,
+                    tokenCount: 0,
+                    success: false,
+                    error: err.message,
+                    response: ''
+                });
+                
+                // Ensure server is stopped even on error
+                try {
+                    await serverManager.shutdown();
+                } catch (e) {
+                    // Ignore shutdown errors
+                }
+                
+                await serverManager.sleep(3000);
+            }
+        }
+    }
+    
+    // Step 5: Generate and display report
+    const reporter = new ResultsReporter(allResults, selectedPrompt);
+    reporter.generateReport();
+    reporter.saveToFile();
+    
+    console.log('✨ Benchmark complete!\n');
+}
+
+// ============================================================================
+// ENTRY POINT
+// ============================================================================
+
+main().catch(err => {
+    console.error('💥 Fatal error:', err);
+    process.exit(1);
+});

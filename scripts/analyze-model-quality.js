@@ -20,7 +20,7 @@ try {
 }
 
 // Get current loaded model
-http.get('http://localhost:8000/props', (res) => {
+const request = http.get('http://localhost:8000/props', (res) => {
     let data = '';
     res.on('data', chunk => data += chunk);
     res.on('end', () => {
@@ -125,4 +125,20 @@ http.get('http://localhost:8000/props', (res) => {
             console.error('Error:', e.message);
         }
     });
+});
+
+request.on('error', (err) => {
+    console.error('❌ Cannot connect to llama-server');
+    console.error('');
+    console.error('llama-server is not running on http://localhost:8000');
+    console.error('');
+    console.error('💡 Start llama-server first:');
+    console.error('   cd D:\\Project-Learning\\lailai-cli\\scripts');
+    console.error('   pwsh -File launch-qwen3coder.ps1');
+    console.error('');
+    console.error('   OR');
+    console.error('');
+    console.error('   pwsh -File launch-gguf.ps1');
+    console.error('');
+    process.exit(1);
 });

@@ -5,6 +5,7 @@ import os from 'os';
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
+import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -73,6 +74,7 @@ const args = process.argv.slice(2);
 const isStream = args.includes('-s') || args.includes('--stream');
 const isDebug = args.includes('--debug') || args.includes('-d');
 const showReasoning = args.includes('--reasoning') || args.includes('-r');
+const autoStart = args.includes('--auto-start') || args.includes('-a');
 const promptId = args[0] ? parseInt(args[0]) : null;
 const presetName = args.includes('--conservative') ? 'conservative' 
                  : args.includes('--creative') ? 'creative' 
@@ -83,6 +85,185 @@ const presetName = args.includes('--conservative') ? 'conservative'
 function debug(...args) {
     if (isDebug) {
         console.log(`\n🔍 [DEBUG]`, ...args);
+    }
+}
+
+// Check if a port is open
+function isPortOpen(port) {
+    return new Promise((resolve) => {
+        const testSocket = http.request({
+            hostname: 'localhost',
+            port: port,
+            path: '/props',
+            method: 'GET',
+            timeout: 2000
+        }, () => {
+            testSocket.destroy();
+            resolve(true);
+        });
+
+        testSocket.on('error', () => {
+            testSocket.destroy();
+            resolve(false);
+        });
+
+        testSocket.on('timeout', () => {
+            testSocket.destroy();
+            resolve(false);
+        });
+
+        testSocket.end();
+    });
+}
+
+// Diagnose llama-server status
+async function diagnoseServer() {
+    console.log('\n🔍 LLAMA-SERVER DIAGNOSTICS');
+    console.log('═'.repeat(70));
+
+    const port = 8000;
+    const host = 'localhost';
+    
+    const isRunning = await isPortOpen(port);
+    
+    if (isRunning) {
+        console.log(`✅ llama-server is RUNNING on ${host}:${port}`);
+        return true;
+    } else {
+        console.log(`❌ llama-server is NOT RUNNING on ${host}:${port}`);
+        console.log('\n📋 NEXT STEPS:');
+        console.log('  1. Option A: Manually start llama-server:');
+        console.log(`     pwsh -File launch-gguf.ps1`);
+        console.log(`     OR`);
+        console.log(`     pwsh -File launch-qwen3coder.ps1`);
+        console.log('\n  2. Option B: Auto-start with this script:');
+        console.log(`     node test-gguf-models.js 1 --auto-start`);
+        console.log('\n  3. Check launchConfig.json for available models');
+        console.log('═'.repeat(70));
+        return false;
+    }
+}
+
+// Attempt to automatically start llama-server
+async function autoStartServer() {
+    console.log('\n🚀 AUTO-START: Attempting to start llama-server...');
+    
+    try {
+        const launchConfigPath = path.join(__dirname, 'launchConfig.json');
+        const launchConfig = JSON.parse(fs.readFileSync(launchConfigPath, 'utf8'));
+        
+        // Get default version
+        let defaultVersion = launchConfig.llamaServerVersions.default;
+        let versionInfo = launchConfig.llamaServerVersions.available[defaultVersion];
+        
+        // If default version doesn't exist, try to find a match
+        if (!versionInfo) {
+            debug(`Default version "${defaultVersion}" not found, searching for alternatives...`);
+            
+            // Try to find a version containing the default name
+            for (const [key, value] of Object.entries(launchConfig.llamaServerVersions.available)) {
+                if (key.includes(defaultVersion)) {
+                    debug(`Found matching version: ${key}`);
+                    defaultVersion = key;
+                    versionInfo = value;
+                    break;
+                }
+            }
+            
+            // If still not found, use the first available
+            if (!versionInfo) {
+                const firstKey = Object.keys(launchConfig.llamaServerVersions.available)[0];
+                if (!firstKey) {
+                    console.error(`❌ No llama-server versions configured in launchConfig`);
+                    return false;
+                }
+                debug(`Using first available version: ${firstKey}`);
+                defaultVersion = firstKey;
+                versionInfo = launchConfig.llamaServerVersions.available[firstKey];
+            }
+        }
+
+        const llamaServerPath = versionInfo.path;
+        
+        if (!fs.existsSync(llamaServerPath)) {
+            console.error(`❌ llama-server executable not found at:`);
+            console.error(`   ${llamaServerPath}`);
+            console.error(`\n📝 Update "launchConfig.json" with correct path`);
+            return false;
+        }
+
+        // Get first model
+        const model = launchConfig.models[0];
+        const modelPath = model.path;
+        
+        if (!fs.existsSync(modelPath)) {
+            console.error(`❌ Model file not found at:`);
+            console.error(`   ${modelPath}`);
+            return false;
+        }
+
+        const params = model.parameters;
+        const args = [
+            "-m", modelPath,
+            "--host", launchConfig.server.host,
+            "--port", launchConfig.server.port,
+            "-c", params.ctx_size,
+            "-n", params.n_predict,
+            "-t", params.n_threads,
+            "-ngl", params.n_gpu_layers,
+            "--temp", params.temperature,
+            "--top-p", params.top_p,
+            "--min-p", params.min_p,
+            "--repeat-penalty", params.repeat_penalty,
+            "--top-k", params.top_k
+        ];
+
+        if (params.jinja) args.push("--jinja");
+        if (params.flash_attn) args.push("--flash-attn", "1");
+        if (params.cache_type_k) args.push("--cache-type-k", params.cache_type_k);
+        if (params.cache_type_v) args.push("--cache-type-v", params.cache_type_v);
+        if (params.no_context_shift) args.push("--no-context-shift");
+
+        console.log(`📦 Starting: ${model.name}`);
+        console.log(`   Executable: ${path.basename(llamaServerPath)}`);
+        console.log(`   Model: ${path.basename(modelPath)}`);
+        
+        // Spawn without wait - let it run in background
+        const proc = spawn(llamaServerPath, args, {
+            detached: true,
+            stdio: 'ignore'
+        });
+        
+        proc.unref();
+
+        console.log(`✅ Process spawned (PID: ${proc.pid})`);
+        console.log(`⏳ Waiting for server to initialize (this may take 3-5 minutes)...`);
+        
+        // Wait for server to be ready
+        const maxWait = 300; // 5 minutes
+        let waited = 0;
+        
+        while (waited < maxWait) {
+            await new Promise(r => setTimeout(r, 2000));
+            waited += 2;
+            
+            if (await isPortOpen(8000)) {
+                console.log(`✅ Server is ready! (after ${waited}s)`);
+                return true;
+            }
+            
+            if (waited % 10 === 0) {
+                console.log(`   Still waiting... (${waited}s elapsed)`);
+            }
+        }
+        
+        console.error(`❌ Server did not respond after ${maxWait}s`);
+        return false;
+
+    } catch (err) {
+        console.error(`❌ Auto-start failed: ${err.message}`);
+        debug(`Auto-start error:`, err);
+        return false;
     }
 }
 
@@ -279,6 +460,24 @@ async function main() {
 
         // Setup graceful shutdown handlers first
         setupGracefulShutdown();
+
+        // Check if llama-server is running
+        const serverRunning = await diagnoseServer();
+        
+        if (!serverRunning) {
+            if (autoStart) {
+                const started = await autoStartServer();
+                if (!started) {
+                    console.error('\n❌ Failed to auto-start llama-server');
+                    process.exit(1);
+                }
+            } else {
+                console.error('\n❌ Please start llama-server first or use --auto-start flag');
+                process.exit(1);
+            }
+        }
+
+        console.log('\n✅ Starting test...\n');
 
         // Fetch available models
         const models = await getLoadedModels();
