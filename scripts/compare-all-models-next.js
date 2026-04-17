@@ -341,27 +341,32 @@ class ModelTester {
         this.host = host;
     }
     
-    async testModel(model, prompt) {
+    async testModel(model, prompt, useStreaming = true) {
         const params = model.parameters;
         
-        // Build request body with model parameters
+        // Determine streaming mode: prompt config takes precedence, then parameter, then default
+        const streamingMode = prompt.streaming !== undefined ? prompt.streaming : useStreaming;
+        
+        // Build request body with OpenAI-compatible format
         const requestBody = {
-            prompt: prompt.prompt,
-            stream: true,  // Always use streaming to capture TTFT
-            n_predict: params.n_predict || -1,
+            messages: [
+                {
+                    role: "user",
+                    content: prompt.prompt
+                }
+            ],
+            stream: streamingMode,  // Use prompt-configured streaming mode
+            max_tokens: params.n_predict || -1,  // Send -1 explicitly like Postman
             temperature: params.temperature || 0.7,
             top_k: params.top_k || 40,
             top_p: params.top_p || 0.9,
             min_p: params.min_p || 0.0,
             repeat_penalty: params.repeat_penalty || 1.0,
+            // CRITICAL: Always include enable_thinking, defaulting to false
+            chat_template_kwargs: {
+                enable_thinking: prompt.enable_thinking !== undefined ? prompt.enable_thinking : false
+            }
         };
-        
-        // Add chat_template_kwargs if enable_thinking is specified in prompt (for Gemma-4)
-        if (prompt.enable_thinking !== undefined) {
-            requestBody.chat_template_kwargs = {
-                enable_thinking: prompt.enable_thinking
-            };
-        }
         
         const body = JSON.stringify(requestBody);
         
@@ -387,8 +392,11 @@ class ModelTester {
         const globalStart = Date.now();
         
         try {
+            // Determine whether to use streaming or one-shot mode
+            const useStreaming = requestBody.stream === true;
+            
             await new Promise((resolve, reject) => {
-                const req = http.request(`http://${this.host}:${this.port}/completion`, {
+                const req = http.request(`http://${this.host}:${this.port}/v1/chat/completions`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -397,50 +405,13 @@ class ModelTester {
                     },
                     timeout: 300000  // 5 minute timeout
                 }, (res) => {
-                    let buffer = '';
+                    // ========== STREAMING MODE HANDLER ==========
+                    if (useStreaming) {
+                        return this._handleStreamingResponse(res, req, result, params, globalStart, resolve, reject);
+                    }
                     
-                    res.on('data', (chunk) => {
-                        buffer += chunk.toString();
-                        const lines = buffer.split('\n');
-                        buffer = lines.pop();
-                        
-                        lines.forEach(line => {
-                            if (line.trim()) {
-                                result.tokenCount++;
-                                
-                                // Capture TTFT on first token
-                                if (result.ttftMs === null) {
-                                    result.ttftMs = Date.now() - globalStart;
-                                    process.stdout.write(`   ⏱️  TTFT: ${(result.ttftMs / 1000).toFixed(3)}s | Streaming: `);
-                                }
-                                
-                                try {
-                                    const json = JSON.parse(line);
-                                    const text = json.response || json.content || '';
-                                    if (text) {
-                                        result.response += text;
-                                        process.stdout.write('.');  // Progress indicator
-                                    }
-                                } catch (e) {
-                                    // Ignore parse errors
-                                }
-                            }
-                        });
-                    });
-                    
-                    res.on('end', () => {
-                        result.totalMs = Date.now() - globalStart;
-                        result.responseLength = result.response.length;
-                        result.success = true;
-                        console.log(''); // Newline after dots
-                        console.log(`   ✅ Total: ${(result.totalMs / 1000).toFixed(3)}s | ${result.responseLength} chars | ${result.tokenCount} tokens`);
-                        resolve();
-                    });
-                    
-                    res.on('error', (err) => {
-                        result.error = err.message;
-                        reject(err);
-                    });
+                    // ========== ONE-SHOT MODE HANDLER ==========
+                    return this._handleOneShotResponse(res, req, result, globalStart, resolve, reject);
                 });
                 
                 req.on('error', (err) => {
@@ -457,6 +428,261 @@ class ModelTester {
         }
         
         return result;
+    }
+    
+    // ========================================================================
+    // STREAMING RESPONSE HANDLER
+    // ========================================================================
+    _handleStreamingResponse(res, req, result, params, globalStart, resolve, reject) {
+        let buffer = '';
+        let streamEnded = false;
+        let streamTimeout = null;
+        
+        // Reset stream timeout on data activity
+        const resetStreamTimeout = () => {
+            if (streamTimeout) clearTimeout(streamTimeout);
+            streamTimeout = setTimeout(() => {
+                if (streamEnded) return;
+                streamEnded = true;
+                console.log('\n   ⚠️  Stream stalled for 60s, assuming completion');
+                result.totalMs = Date.now() - globalStart;
+                result.responseLength = result.response.length;
+                result.success = result.tokenCount > 0;
+                result.error = result.tokenCount === 0 ? 'Stream stalled with no tokens' : null;
+                console.log(`   ${result.success ? '✅' : '⚠️'} Completed: ${(result.totalMs / 1000).toFixed(3)}s | ${result.responseLength} chars | ${result.tokenCount} tokens`);
+                req.destroy();
+                resolve();
+            }, 60000);  // 60 second stall timeout
+        };
+        
+        resetStreamTimeout();
+        
+        res.on('data', (chunk) => {
+            if (streamEnded) {
+                req.destroy();  // Kill request if already done
+                return;
+            }
+            
+            resetStreamTimeout();
+            buffer += chunk.toString();
+            const lines = buffer.split('\n');
+            buffer = lines.pop();  // Keep incomplete line in buffer
+            
+            // Process complete lines
+            for (let i = 0; i < lines.length; i++) {
+                if (streamEnded) break;  // Stop processing if complete
+                
+                const trimmed = lines[i].trim();
+                if (!trimmed) continue;
+                
+                // Capture TTFT on first chunk with content
+                if (result.ttftMs === null) {
+                    result.ttftMs = Date.now() - globalStart;
+                    process.stdout.write(`   ⏱️  TTFT: ${(result.ttftMs / 1000).toFixed(3)}s | Streaming: `);
+                }
+                
+                try {
+                    // Parse SSE format: "data: {...}"
+                    let jsonStr = trimmed;
+                    if (trimmed.startsWith('data: ')) {
+                        jsonStr = trimmed.substring(6);
+                    }
+                    
+                    // Check for completion sentinel
+                    if (!jsonStr || jsonStr === '[DONE]') {
+                        if (jsonStr === '[DONE]') {
+                            if (VERBOSE_SERVER_OUTPUT) {
+                                console.log(`\n   [DEBUG] ✅ Received [DONE] sentinel`);
+                            }
+                            this._completeStreaming(streamTimeout, result, globalStart, req, resolve);
+                        }
+                        continue;
+                    }
+                    
+                    const json = JSON.parse(jsonStr);
+                    const choice = json.choices?.[0];
+                    const delta = choice?.delta;
+                    const finishReason = choice?.finish_reason;
+                    const text = delta?.content || '';
+                    
+                    // Process tokens
+                    if (text && text.length > 0) {
+                        result.response += text;
+                        result.tokenCount++;
+                        process.stdout.write(text);
+                        if (result.tokenCount % 50 === 0) {
+                            process.stdout.write(`[${result.tokenCount}]`);
+                        }
+                    }
+                    
+                    // DEBUG: Log finish reason changes
+                    if (VERBOSE_SERVER_OUTPUT && finishReason) {
+                        console.log(`\n   [DEBUG] finish_reason="${finishReason}" at token ${result.tokenCount}`);
+                    }
+                    
+                    // Check for stop signals (finish_reason is set)
+                    const isComplete = finishReason !== null && finishReason !== undefined;
+                    if (isComplete) {
+                        if (VERBOSE_SERVER_OUTPUT) {
+                            console.log(`\n   [DEBUG] Server completed (finish_reason=${finishReason})`);
+                        }
+                        this._completeStreaming(streamTimeout, result, globalStart, req, resolve);
+                        break;
+                    }
+                    
+                    // Check token limits
+                    const nPredict = params.n_predict || -1;
+                    const ABSOLUTE_MAX_TOKENS = 8192;
+                    
+                    if (nPredict > 0 && result.tokenCount >= nPredict) {
+                        if (VERBOSE_SERVER_OUTPUT) {
+                            console.log(`\n   [DEBUG] Reached n_predict limit (${nPredict})`);
+                        }
+                        this._completeStreaming(streamTimeout, result, globalStart, req, resolve);
+                        break;
+                    }
+                    
+                    if (result.tokenCount >= ABSOLUTE_MAX_TOKENS) {
+                        if (VERBOSE_SERVER_OUTPUT) {
+                            console.log(`\n   [DEBUG] Reached absolute limit (${ABSOLUTE_MAX_TOKENS})`);
+                        }
+                        this._completeStreaming(streamTimeout, result, globalStart, req, resolve);
+                        break;
+                    }
+                    
+                } catch (e) {
+                    if (VERBOSE_SERVER_OUTPUT && trimmed.length < 200) {
+                        console.log(`\n   [DEBUG] Parse error: ${e.message}`);
+                    }
+                }
+            }
+        });
+        
+        res.on('end', () => {
+            if (streamEnded) return;
+            this._completeStreaming(streamTimeout, result, globalStart, req, resolve);
+        });
+        
+        res.on('error', (err) => {
+            if (streamEnded) return;
+            if (result.tokenCount > 0) {
+                // Partial success if we got tokens
+                this._completeStreaming(streamTimeout, result, globalStart, req, resolve);
+            } else {
+                streamEnded = true;
+                if (streamTimeout) clearTimeout(streamTimeout);
+                result.error = err.message;
+                console.log(`   ❌ Error: ${err.message}`);
+                resolve();
+            }
+        });
+    }
+    
+    // Helper to cleanly complete streaming
+    _completeStreaming(streamTimeout, result, globalStart, req, resolve) {
+        if (streamTimeout) clearTimeout(streamTimeout);
+        result.totalMs = Date.now() - globalStart;
+        result.responseLength = result.response.length;
+        result.success = true;
+        console.log('');
+        console.log(`   ✅ Total: ${(result.totalMs / 1000).toFixed(3)}s | ${result.responseLength} chars | ${result.tokenCount} tokens`);
+        req.destroy();
+        resolve();
+    }
+    
+    // ========================================================================
+    // ONE-SHOT (NON-STREAMING) RESPONSE HANDLER
+    // ========================================================================
+    _handleOneShotResponse(res, req, result, globalStart, resolve, reject) {
+        let buffer = '';
+        let responseTimeout = null;
+        let responseCompleted = false;
+        
+        // Set timeout for complete response
+        responseTimeout = setTimeout(() => {
+            if (responseCompleted) return;
+            responseCompleted = true;
+            console.log('\n   ⚠️  Response timeout after 60s');
+            result.totalMs = Date.now() - globalStart;
+            result.success = false;
+            result.error = 'Response timeout';
+            req.destroy();
+            resolve();
+        }, 60000);
+        
+        res.on('data', (chunk) => {
+            if (responseCompleted) {
+                req.destroy();
+                return;
+            }
+            buffer += chunk.toString();
+        });
+        
+        res.on('end', () => {
+            if (responseCompleted) return;
+            responseCompleted = true;
+            if (responseTimeout) clearTimeout(responseTimeout);
+            
+            try {
+                if (!buffer) {
+                    result.error = 'Empty response';
+                    result.success = false;
+                    console.log('   ❌ Empty response received');
+                    resolve();
+                    return;
+                }
+                
+                // Record TTFT (no streaming, so TTFT = total)
+                result.ttftMs = Date.now() - globalStart;
+                result.totalMs = result.ttftMs;
+                
+                // Parse response
+                const json = JSON.parse(buffer);
+                const choice = json.choices?.[0];
+                const message = choice?.message;
+                const text = message?.content || '';
+                
+                if (!text) {
+                    result.error = 'No content in response';
+                    result.success = false;
+                    console.log('   ❌ No content in response');
+                    resolve();
+                    return;
+                }
+                
+                // Extract response
+                result.response = text;
+                result.responseLength = text.length;
+                
+                // Estimate tokens (rough: ~4 chars per token)
+                result.tokenCount = Math.ceil(text.length / 4);
+                
+                result.success = true;
+                console.log(`   ⏱️  TTFT: ${(result.ttftMs / 1000).toFixed(3)}s (one-shot mode)`);
+                console.log(`   ✅ Total: ${(result.totalMs / 1000).toFixed(3)}s | ${result.responseLength} chars | ~${result.tokenCount} tokens (estimated)`);
+                
+                resolve();
+                
+            } catch (e) {
+                if (VERBOSE_SERVER_OUTPUT) {
+                    console.log(`\n   [DEBUG] Response parse error: ${e.message}`);
+                    console.log(`   [DEBUG] Buffer (first 200 chars): ${buffer.substring(0, 200)}`);
+                }
+                result.error = e.message;
+                result.success = false;
+                resolve();
+            }
+        });
+        
+        res.on('error', (err) => {
+            if (responseCompleted) return;
+            responseCompleted = true;
+            if (responseTimeout) clearTimeout(responseTimeout);
+            result.error = err.message;
+            result.success = false;
+            console.log(`   ❌ Error: ${err.message}`);
+            resolve();
+        });
     }
 }
 
@@ -667,7 +893,18 @@ async function main() {
     
     // Step 2: Get server versions to test
     const serverVersions = Object.keys(launchConfig.llamaServerVersions.available);
+    const modelCount = launchConfig.models.length;
     console.log('🖥️  Server versions to test:', serverVersions.join(', '));
+    console.log(`   (Combinations are numbered sequentially: each server × each model)`);
+    if (serverVersions.length > 1) {
+        console.log(`   With ${serverVersions.length} servers and ${modelCount} models:`);
+        console.log(`   - Combinations 1-${modelCount} = Server 1 (${serverVersions[0]})`);
+        for (let s = 1; s < serverVersions.length; s++) {
+            const start = s * modelCount + 1;
+            const end = (s + 1) * modelCount;
+            console.log(`   - Combinations ${start}-${end} = Server ${s + 1} (${serverVersions[s]})`);
+        }
+    }
     
     // Step 3: Get models to test
     const models = launchConfig.models;
@@ -715,13 +952,39 @@ async function main() {
             
             // Skip combinations before the starting point
             if (combinationNumber < START_FROM_COMBINATION) {
-                console.log(`\n⏭️  Skipping combination #${combinationNumber}: ${model.name} × ${serverVersion}`);
+                console.log(`\n⏭️  Skipping combination #${combinationNumber}: ${model.id}. ${model.name} × ${serverVersion}`);
                 continue;
             }
             
             console.log(`\n[Combination #${combinationNumber}/${totalTests}] ════════════════════════════════════════════════════════════════`);
-            console.log(`   Model: ${model.name}`);
+            console.log(`   Model ID: ${model.id} | Name: ${model.name}`);
             console.log(`   Server: ${serverVersion}`);
+            
+            // Check if vision model has required mmproj file
+            const isVisionModel = model.name.includes('VL') || model.name.includes('Vision') || model.name.includes('GLM') || model.name.includes('SmolVLM');
+            const hasMmproj = model.parameters?.mmproj && model.parameters.mmproj !== '';
+            
+            if (isVisionModel && !hasMmproj) {
+                console.log(`   ⚠️  WARNING: Vision model missing mmproj file - skipping to prevent hang`);
+                allResults.push({
+                    modelId: model.id,
+                    modelName: model.name,
+                    filename: model.filename,
+                    promptId: selectedPrompt.id,
+                    promptName: selectedPrompt.name,
+                    promptLength: selectedPrompt.prompt.length,
+                    serverVersion: serverVersion,
+                    combinationNumber: combinationNumber,
+                    ttftMs: null,
+                    totalMs: null,
+                    responseLength: 0,
+                    tokenCount: 0,
+                    success: false,
+                    error: 'Vision model requires mmproj file (not configured in launchConfig.json)',
+                    response: ''
+                });
+                continue;
+            }
             
             try {
                 // Launch server with this model and version
