@@ -344,16 +344,26 @@ class ModelTester {
     async testModel(model, prompt) {
         const params = model.parameters;
         
-        const body = JSON.stringify({
+        // Build request body with model parameters
+        const requestBody = {
             prompt: prompt.prompt,
             stream: true,  // Always use streaming to capture TTFT
-            n_predict: params.n_predict || -1,
-            temperature: params.temperature || 0.7,
-            top_k: params.top_k || 40,
-            top_p: params.top_p || 0.9,
-            min_p: params.min_p || 0.0,
-            repeat_penalty: params.repeat_penalty || 1.0,
-        });
+            // n_predict: params.n_predict || -1,
+            // temperature: params.temperature || 0.7,
+            // top_k: params.top_k || 40,
+            // top_p: params.top_p || 0.9,
+            // min_p: params.min_p || 0.0,
+            // repeat_penalty: params.repeat_penalty || 1.0,
+        };
+        
+        // Add chat_template_kwargs if enable_thinking is specified (for Gemma-4)
+        if (params.enable_thinking !== undefined) {
+            requestBody.chat_template_kwargs = {
+                enable_thinking: params.enable_thinking
+            };
+        }
+        
+        const body = JSON.stringify(requestBody);
         
         console.log(`\n🧪 Testing: ${model.name}`);
         console.log(`   Prompt: "${prompt.name}" (${prompt.prompt.length} chars)`);
@@ -635,7 +645,19 @@ class ResultsReporter {
         };
     }
 }
-if (START_FROM_COMBINATION > 1) {
+
+// ============================================================================
+// MAIN ORCHESTRATOR
+// ============================================================================
+
+async function main() {
+    console.clear();
+    console.log('╔═══════════════════════════════════════════════════════════════════════════════╗');
+    console.log('║                    COMPREHENSIVE MODEL BENCHMARK SUITE                        ║');
+    console.log('║                  Multi-Model × Multi-Version Performance Analysis              ║');
+    console.log('╚═══════════════════════════════════════════════════════════════════════════════╝');
+    
+    if (START_FROM_COMBINATION > 1) {
         console.log(`\n🔄 Resuming from combination #${START_FROM_COMBINATION}\n`);
     }
     
@@ -708,20 +730,7 @@ if (START_FROM_COMBINATION > 1) {
                 // Run test
                 const result = await tester.testModel(model, selectedPrompt);
                 result.serverVersion = serverVersion;
-                result.combinationNumber = combinationNumber
-        
-        for (const model of models) {
-            testNumber++;
-            console.log(`\n[${testNumber}/${totalTests}] ════════════════════════════════════════════════════════════════`);
-            
-            try {
-                // Launch server with this model and version
-                await serverManager.launch(model, serverVersion);
-                
-                // Run test
-                const result = await tester.testModel(model, selectedPrompt);
-                resucombinationNumber: combinationNumber,
-                    lt.serverVersion = serverVersion;
+                result.combinationNumber = combinationNumber;
                 allResults.push(result);
                 
                 // Shutdown server
@@ -740,6 +749,7 @@ if (START_FROM_COMBINATION > 1) {
                     promptName: selectedPrompt.name,
                     promptLength: selectedPrompt.prompt.length,
                     serverVersion: serverVersion,
+                    combinationNumber: combinationNumber,
                     ttftMs: null,
                     totalMs: null,
                     responseLength: 0,
@@ -766,8 +776,8 @@ if (START_FROM_COMBINATION > 1) {
     reporter.generateReport();
     reporter.saveToFile();
     
-    console.log(`💡 To resume from a specific combination, use: node compare-all-models-next.js --start=N\n`);
     console.log('✨ Benchmark complete!\n');
+    console.log('💡 To resume from a specific combination, use: node compare-all-models-next.js --start=N\n');
 }
 
 // ============================================================================
