@@ -16,6 +16,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const VERBOSE_SERVER_OUTPUT = true;  // Set to false to suppress server logs
 
+// Parse command line arguments for starting combination
+const args = process.argv.slice(2);
+const startFromArg = args.find(arg => arg.startsWith('--start='));
+const START_FROM_COMBINATION = startFromArg 
+    ? parseInt(startFromArg.split('=')[1]) 
+    : 1;
+
+if (START_FROM_COMBINATION < 1) {
+    console.error('❌ Error: --start must be >= 1');
+    process.exit(1);
+}
+
 // ============================================================================
 // CONFIGURATION LOADER - JSONC Support
 // ============================================================================
@@ -623,17 +635,9 @@ class ResultsReporter {
         };
     }
 }
-
-// ============================================================================
-// MAIN ORCHESTRATOR
-// ============================================================================
-
-async function main() {
-    console.clear();
-    console.log('╔═══════════════════════════════════════════════════════════════════════════════╗');
-    console.log('║                    COMPREHENSIVE MODEL BENCHMARK SUITE                        ║');
-    console.log('║                  Multi-Model × Multi-Version Performance Analysis              ║');
-    console.log('╚═══════════════════════════════════════════════════════════════════════════════╝');
+if (START_FROM_COMBINATION > 1) {
+        console.log(`\n🔄 Resuming from combination #${START_FROM_COMBINATION}\n`);
+    }
     
     // Step 1: Select prompt
     const selectedPrompt = await selectPrompt();
@@ -647,7 +651,13 @@ async function main() {
     const models = launchConfig.models;
     console.log(`📦 Models to test: ${models.length} models`);
     
-    console.log(`\n⚡ Total combinations: ${models.length} models × ${serverVersions.length} versions = ${models.length * serverVersions.length} tests\n`);
+    const totalTests = models.length * serverVersions.length;
+    console.log(`\n⚡ Total combinations: ${models.length} models × ${serverVersions.length} versions = ${totalTests} tests`);
+    
+    if (START_FROM_COMBINATION > 1) {
+        console.log(`   Starting from combination ${START_FROM_COMBINATION}, will run ${totalTests - START_FROM_COMBINATION + 1} tests`);
+    }
+    console.log('');
     
     // Confirm before starting
     const rl = readline.createInterface({
@@ -667,17 +677,38 @@ async function main() {
     const tester = new ModelTester(serverManager.port, serverManager.host);
     const allResults = [];
     
-    let testNumber = 0;
-    const totalTests = models.length * serverVersions.length;
+    let combinationNumber = 0;
     
     console.log('\n' + '═'.repeat(100));
     console.log('🚀 STARTING BENCHMARK');
     console.log('═'.repeat(100) + '\n');
     
     for (const serverVersion of serverVersions) {
-        console.log('\n' + '-'.repeat(100));
+        console.log('\n' + '█'.repeat(100));
         console.log(`🖥️  TESTING WITH SERVER VERSION: ${serverVersion}`);
-        console.log('-'.repeat(100));
+        console.log('█'.repeat(100));
+        
+        for (const model of models) {
+            combinationNumber++;
+            
+            // Skip combinations before the starting point
+            if (combinationNumber < START_FROM_COMBINATION) {
+                console.log(`\n⏭️  Skipping combination #${combinationNumber}: ${model.name} × ${serverVersion}`);
+                continue;
+            }
+            
+            console.log(`\n[Combination #${combinationNumber}/${totalTests}] ════════════════════════════════════════════════════════════════`);
+            console.log(`   Model: ${model.name}`);
+            console.log(`   Server: ${serverVersion}`);
+            
+            try {
+                // Launch server with this model and version
+                await serverManager.launch(model, serverVersion);
+                
+                // Run test
+                const result = await tester.testModel(model, selectedPrompt);
+                result.serverVersion = serverVersion;
+                result.combinationNumber = combinationNumber
         
         for (const model of models) {
             testNumber++;
@@ -689,7 +720,8 @@ async function main() {
                 
                 // Run test
                 const result = await tester.testModel(model, selectedPrompt);
-                result.serverVersion = serverVersion;
+                resucombinationNumber: combinationNumber,
+                    lt.serverVersion = serverVersion;
                 allResults.push(result);
                 
                 // Shutdown server
@@ -734,6 +766,7 @@ async function main() {
     reporter.generateReport();
     reporter.saveToFile();
     
+    console.log(`💡 To resume from a specific combination, use: node compare-all-models-next.js --start=N\n`);
     console.log('✨ Benchmark complete!\n');
 }
 
@@ -741,7 +774,36 @@ async function main() {
 // ENTRY POINT
 // ============================================================================
 
+// Display help if requested
+if (args.includes('--help') || args.includes('-h')) {
+    console.log(`
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║              COMPREHENSIVE MODEL BENCHMARK SUITE - Help                       ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+Usage: node compare-all-models-next.js [options]
+
+Options:
+  --start=N         Start from combination number N (default: 1)
+  --help, -h        Show this help message
+
+Examples:
+  node compare-all-models-next.js
+      Run all combinations from the beginning
+
+  node compare-all-models-next.js --start=10
+      Resume from combination #10 (useful after interruption)
+
+Notes:
+  - Combination numbers are displayed during execution as [Combination #N/Total]
+  - If interrupted, note the last completed combination and resume from next
+  - Results are saved incrementally to JSON file after completion
+`);
+    process.exit(0);
+}
+
 main().catch(err => {
     console.error('💥 Fatal error:', err);
+    console.error('\n💡 You can resume from a specific combination using: node compare-all-models-next.js --start=N');
     process.exit(1);
 });
