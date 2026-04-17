@@ -6,34 +6,34 @@ import path from 'path';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import readline from 'readline';
+import { parse as parseJsonc } from 'jsonc-parser';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ============================================================================
-// CONFIGURATION LOADER
+// CONFIGURATION LOADER - JSONC Support
 // ============================================================================
 
-// Strip comments from JSON (supports // and /* */ style comments)
-function stripJsonComments(jsonString) {
-    // Remove single-line comments
-    let result = jsonString.replace(/\/\/.*$/gm, '');
-    // Remove multi-line comments
-    result = result.replace(/\/\*[\s\S]*?\*\//g, '');
-    return result;
-}
-
-function loadJsonWithComments(filepath) {
-    const data = fs.readFileSync(filepath, 'utf8');
-    const stripped = stripJsonComments(data);
-    return JSON.parse(stripped);
+function loadJsonc(filepath) {
+    try {
+        const data = fs.readFileSync(filepath, 'utf8');
+        const parsed = parseJsonc(data);
+        if (parsed === undefined) {
+            throw new Error('Failed to parse JSONC file');
+        }
+        return parsed;
+    } catch (err) {
+        console.error(`❌ Error parsing ${path.basename(filepath)}:`, err.message);
+        throw err;
+    }
 }
 
 let launchConfig = {};
 let promptConfig = {};
 
 try {
-    launchConfig = loadJsonWithComments(path.join(__dirname, 'launchConfig.json'));
-    promptConfig = loadJsonWithComments(path.join(__dirname, 'promptConfig.json'));
+    launchConfig = loadJsonc(path.join(__dirname, 'launchConfig.json'));
+    promptConfig = loadJsonc(path.join(__dirname, 'promptConfig.json'));
 } catch (e) {
     console.error('❌ Failed to load configuration files:', e.message);
     process.exit(1);
