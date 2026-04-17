@@ -348,18 +348,18 @@ class ModelTester {
         const requestBody = {
             prompt: prompt.prompt,
             stream: true,  // Always use streaming to capture TTFT
-            // n_predict: params.n_predict || -1,
-            // temperature: params.temperature || 0.7,
-            // top_k: params.top_k || 40,
-            // top_p: params.top_p || 0.9,
-            // min_p: params.min_p || 0.0,
-            // repeat_penalty: params.repeat_penalty || 1.0,
+            n_predict: params.n_predict || -1,
+            temperature: params.temperature || 0.7,
+            top_k: params.top_k || 40,
+            top_p: params.top_p || 0.9,
+            min_p: params.min_p || 0.0,
+            repeat_penalty: params.repeat_penalty || 1.0,
         };
         
-        // Add chat_template_kwargs if enable_thinking is specified (for Gemma-4)
-        if (params.enable_thinking !== undefined) {
+        // Add chat_template_kwargs if enable_thinking is specified in prompt (for Gemma-4)
+        if (prompt.enable_thinking !== undefined) {
             requestBody.chat_template_kwargs = {
-                enable_thinking: params.enable_thinking
+                enable_thinking: prompt.enable_thinking
             };
         }
         
