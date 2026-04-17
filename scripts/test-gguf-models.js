@@ -149,7 +149,7 @@ function getLoadedModels() {
                             if (foundModel) {
                                 debug(`✅ Case-insensitive filename match found for: "${foundModel.name}"`);
                             }
-                        }
+                        } 
                         
                         if (foundModel) {
                             modelParams = foundModel.parameters;
@@ -375,7 +375,9 @@ async function main() {
             console.log(`   🌡️  Temperature : ${params.temperature?.toFixed(2)}`);
             console.log(`   🔄 Repeat Penalty : ${params.repeat_penalty?.toFixed(2)}`);
             console.log(`   📊 Top-K     : ${params.top_k} | Top-P: ${params.top_p?.toFixed(2)}`);
-            console.log(`   📏 Min-P     : ${params.min_p?.toFixed(3)}`);
+            if (params.min_p !== undefined) {
+                console.log(`   📏 Min-P     : ${params.min_p?.toFixed(3)}`);
+            }
         }
         console.log(`💾 System       : ${os.cpus().length} cores | ${(os.totalmem() / 1024 / 1024 / 1024).toFixed(1)}GB RAM`);
         console.log('═'.repeat(70));

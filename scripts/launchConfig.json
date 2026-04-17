@@ -293,6 +293,48 @@
         "cache_type_k": "q8_0",
         "cache_type_v": "q8_0"
       }
+    },
+    {
+      "id": 9,
+      "name": "Qwen3-Coder-Next-UD-Q5_K_M",
+      "filename": "Qwen3-Coder-Next-UD-Q5_K_M.gguf",
+      "path": "D:\\Large-Lang-Models\\qwen-coder-next\\Qwen3-Coder-Next-UD-Q5_K_M.gguf",
+      "description": "Qwen3 Coder Next 80B MoE (3B active) - Agentic coding with long-horizon reasoning, tool-calling, and execution recovery. Fast code generation with 256K native context.",
+      "url": "https://huggingface.co/unsloth/Qwen3-Coder-Next-GGUF",
+      "notes": [
+        "MoE MODEL: 80B total params / 3B active per token — extremely fast, comparable to 10-20× larger dense models",
+        "Hybrid architecture: 12 layers with Gated DeltaNet + Gated Attention + 512 experts (10 activated) per layer",
+        "NON-THINKING mode only: no <think></think> blocks — ultra-fast agentic responses without reasoning overhead",
+        "Expert routing: n_threads=4 optimal (same as Qwen3-Coder-30B-A3B) — CPU handles routing, fewer threads = less contention",
+        "Qwen-recommended sampling (OFFICIAL from Hugging Face & Unsloth docs): temp=1.0, top_p=0.95, top_k=40, min_p=0.01, repeat_penalty=disabled/1.0",
+        "repeat_penalty=1.0: Unsloth confirms 'disabled or 1.0' — llama-server defaults to 1.05, override to 1.0 if looping observed",
+        "min_p=0.01: Unsloth explicitly sets 0.01 (vs llama-server default 0.05) — important for tool calling quality",
+        "Context: 262,144 tokens native — can set to 32,768 for less memory use if prompts are small",
+        "Q5_K_M quant: ~55-59GB estimated (check Unsloth repo for exact size) — balance of quality and speed",
+        "Tool-calling: ENABLED by default — excels at long-horizon reasoning, function calls, recovery from failures",
+        "cache_type_k/v q8_0: safe for KV compaction; halves memory cost with negligible quality loss",
+        "flash_attn=true: safe and beneficial for MoE routing efficiency",
+        "jinja=true: required for correct chat template and tool calling support",
+        "n_predict=-1: let EOS stop naturally — model trained for proper stopping behavior",
+        "IMPORTANT: Feb 4 llama.cpp fix corrected vectorized key_gdiff calculation — must use latest llama.cpp (>b8665)",
+        "If model loops/poor output: ensure llama.cpp is updated AND repeat_penalty is not >1.1",
+        "Feb 19 update: Tool-calling improved after llama.cpp parsing fixes"
+      ],
+      "parameters": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "min_p": 0.01,
+        "repeat_penalty": 1.0,
+        "top_k": 40,
+        "ctx_size": 65536,
+        "n_predict": -1,
+        "n_threads": 4,
+        "n_gpu_layers": 99,
+        "flash_attn": true,
+        "jinja": true,
+        "cache_type_k": "q8_0",
+        "cache_type_v": "q8_0"
+      }
     }
   ],
   "server": {
