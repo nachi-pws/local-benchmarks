@@ -150,11 +150,31 @@ class LlamaServerManager {
         if (params.cache_type_v) {
             args.push('--cache-type-v', params.cache_type_v);
         }
-        if (params.chat_template_file) {
-            args.push('--chat-template', params.chat_template_file);
+        
+        // Check chat_template_file existence
+        if (params.chat_template_file && params.chat_template_file !== '') {
+            if (fs.existsSync(params.chat_template_file)) {
+                args.push('--chat-template', params.chat_template_file);
+                if (VERBOSE_SERVER_OUTPUT) {
+                    console.log(`✅ Chat template found: ${params.chat_template_file}`);
+                }
+            } else {
+                console.log(`⚠️  Chat template not found: ${params.chat_template_file}`);
+                console.log(`   Model will use built-in template (if available)`);
+            }
         }
+        
+        // Check mmproj existence
         if (params.mmproj && params.mmproj !== '') {
-            args.push('--mmproj', params.mmproj);
+            if (fs.existsSync(params.mmproj)) {
+                args.push('--mmproj', params.mmproj);
+                if (VERBOSE_SERVER_OUTPUT) {
+                    console.log(`✅ Multimodal projection found: ${params.mmproj}`);
+                }
+            } else {
+                console.log(`⚠️  Multimodal projection file not found: ${params.mmproj}`);
+                console.log(`   Vision capabilities may not work correctly`);
+            }
         }
         
         console.log(`🚀 Launching llama-server...`);
@@ -965,25 +985,8 @@ async function main() {
             const hasMmproj = model.parameters?.mmproj && model.parameters.mmproj !== '';
             
             if (isVisionModel && !hasMmproj) {
-                console.log(`   ⚠️  WARNING: Vision model missing mmproj file - skipping to prevent hang`);
-                allResults.push({
-                    modelId: model.id,
-                    modelName: model.name,
-                    filename: model.filename,
-                    promptId: selectedPrompt.id,
-                    promptName: selectedPrompt.name,
-                    promptLength: selectedPrompt.prompt.length,
-                    serverVersion: serverVersion,
-                    combinationNumber: combinationNumber,
-                    ttftMs: null,
-                    totalMs: null,
-                    responseLength: 0,
-                    tokenCount: 0,
-                    success: false,
-                    error: 'Vision model requires mmproj file (not configured in launchConfig.json)',
-                    response: ''
-                });
-                continue;
+                console.log(`   ⚠️  WARNING: Vision model configured without mmproj file`);
+                console.log(`   ℹ️  Proceeding anyway - vision features will not work correctly`);
             }
             
             try {
