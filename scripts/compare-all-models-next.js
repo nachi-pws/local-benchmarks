@@ -123,9 +123,15 @@ class LlamaServerManager {
         ];
         
         // Optional parameters
-        if (params.flash_attn) args.push('--flash-attn');
-        if (params.jinja) args.push('--jinja');
-        if (params.no_context_shift) args.push('--no-context-shift');
+        if (params.flash_attn) {
+            args.push('--flash-attn', 'on');
+        }
+        if (params.jinja) {
+            args.push('--jinja');
+        }
+        if (params.no_context_shift) {
+            args.push('--no-context-shift');
+        }
         if (params.cache_type_k) {
             args.push('--cache-type-k', params.cache_type_k);
         }
@@ -148,6 +154,15 @@ class LlamaServerManager {
             console.log(`\n📋 Command: ${serverPath}`);
             console.log(`   Args: ${args.join(' ')}\n`);
         }
+        
+        // Estimate loading time based on model size
+        const modelSizeNote = model.name.includes('30B') || model.name.includes('31B') || model.name.includes('27B')
+            ? '⏰ Large model - initial load may take 30-60 seconds...'
+            : model.name.includes('9B') || model.name.includes('500M')
+            ? '⏰ Model loading typically takes 10-20 seconds...'
+            : '⏰ Model loading may take 30-90 seconds...';
+        
+        console.log(`   ${modelSizeNote}\n`);
         
         // Spawn the server process
         this.process = spawn(serverPath, args, {
@@ -272,24 +287,30 @@ class LlamaServerManager {
         console.log('🛑 Shutting down llama-server...');
         
         return new Promise((resolve) => {
+            let exited = false;
+            
             this.process.on('exit', () => {
-                this.process = null;
-                console.log('✅ Server stopped');
-                resolve();
+                if (!exited) {
+                    exited = true;
+                    this.process = null;
+                    console.log('✅ Server stopped');
+                    resolve();
+                }
             });
             
             // Try graceful shutdown first
             this.process.kill('SIGTERM');
             
-            // Force kill after 5 seconds if still running
+            // Force kill after 30 seconds if still running (large models need time)
             setTimeout(() => {
-                if (this.process) {
-                    console.log('⚠️  Force killing server...');
+                if (this.process && !exited) {
+                    console.log('⚠️  Force killing server (timeout after 30s)...');
                     this.process.kill('SIGKILL');
                     this.process = null;
+                    exited = true;
                     resolve();
                 }
-            }, 5000);
+            }, 30000);  // Increased from 5000 to 30000
         });
     }
     
@@ -654,9 +675,9 @@ async function main() {
     console.log('═'.repeat(100) + '\n');
     
     for (const serverVersion of serverVersions) {
-        console.log('\n' + '█'.repeat(100));
+        console.log('\n' + '-'.repeat(100));
         console.log(`🖥️  TESTING WITH SERVER VERSION: ${serverVersion}`);
-        console.log('█'.repeat(100));
+        console.log('-'.repeat(100));
         
         for (const model of models) {
             testNumber++;
