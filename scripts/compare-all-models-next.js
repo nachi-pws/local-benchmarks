@@ -113,6 +113,7 @@ class LlamaServerManager {
         this.startupDelay = launchConfig.server?.startup_delay_ms || 30000;
         this.healthEndpoint = launchConfig.server?.health_check_endpoint || '/health';
         this.healthTimeout = launchConfig.server?.health_check_timeout_ms || 3000;
+        this.modelLoadTimeMs = 0;
     }
     
     async launch(model, serverVersion) {
@@ -232,11 +233,17 @@ class LlamaServerManager {
             }
         });
         
+        // Track spawn time for model load measurement
+        const spawnTime = Date.now();
+        
         // Wait for server to be ready
-        await this.waitForReady();
+        await this.waitForReady(spawnTime);
+        
+        // Return the actual model load time
+        return this.modelLoadTimeMs;
     }
     
-    async waitForReady() {
+    async waitForReady(spawnTime) {
         const maxAttempts = launchConfig.server?.max_wait_attempts || 60;
         const interval = launchConfig.server?.attempt_interval_ms || 2000;
         
@@ -257,7 +264,10 @@ class LlamaServerManager {
                     if (VERBOSE_SERVER_OUTPUT) {
                         console.log('ready! ✓');
                     }
+                    // Capture model load time: from spawn to slots available
+                    this.modelLoadTimeMs = Date.now() - spawnTime;
                     console.log(`✅ Server is ready (attempt ${i + 1})!`);
+                    console.log(`   📊 Model load time (spawn → slots): ${(this.modelLoadTimeMs / 1000).toFixed(3)}s`);
                     // Additional startup delay for model loading
                     if (VERBOSE_SERVER_OUTPUT) {
                         console.log(`   Waiting additional ${this.startupDelay}ms for model loading...`);
@@ -361,7 +371,7 @@ class ModelTester {
         this.host = host;
     }
     
-    async testModel(model, prompt, useStreaming = true) {
+    async testModel(model, prompt, useStreaming = true, modelLoadTimeMs = 0) {
         const params = model.parameters;
         
         // Determine streaming mode: prompt config takes precedence, then parameter, then default
@@ -402,6 +412,7 @@ class ModelTester {
             promptLength: prompt.prompt.length,
             ttftMs: null,
             totalMs: null,
+            modelLoadTimeMs: modelLoadTimeMs,
             responseLength: 0,
             tokenCount: 0,
             success: false,
@@ -1023,10 +1034,10 @@ async function main() {
             
             try {
                 // Launch server with this model and version
-                await serverManager.launch(model, serverVersion);
+                const modelLoadTimeMs = await serverManager.launch(model, serverVersion);
                 
                 // Run test
-                const result = await tester.testModel(model, selectedPrompt);
+                const result = await tester.testModel(model, selectedPrompt, true, modelLoadTimeMs);
                 result.serverVersion = serverVersion;
                 result.combinationNumber = combinationNumber;
                 allResults.push(result);
@@ -1046,6 +1057,7 @@ async function main() {
                     promptId: selectedPrompt.id,
                     promptName: selectedPrompt.name,
                     promptLength: selectedPrompt.prompt.length,
+                    modelLoadTimeMs: 0,
                     serverVersion: serverVersion,
                     combinationNumber: combinationNumber,
                     ttftMs: null,

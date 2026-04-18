@@ -27,26 +27,9 @@ function formatNumber(n) {
     return Math.round(n).toLocaleString();
 }
 
-/**
- * Estimate model load time from TTFT
- * TTFT = Model Load Time + Prompt Processing + First Token Generation
- * We estimate the latter two and derive load time
- */
-function estimateModelLoadTime(ttftMs, responseLength, tokenCount) {
-    if (!ttftMs || ttftMs <= 0) return 0;
-    
-    // Estimate token generation time: ~100-150ms per token typically
-    // But first token is often slower, use conservative estimate
-    const estimatedFirstTokenMs = 40;  // 40ms for first token generation
-    
-    // Rough prompt processing: ~2ms per token for typical prompts
-    const estimatedPromptProcessing = Math.max(20, 2);  // minimum 20ms
-    
-    // Model load time is remainder
-    const estimatedLoadTime = Math.max(0, ttftMs - estimatedFirstTokenMs - estimatedPromptProcessing);
-    
-    return estimatedLoadTime;
-}
+// ============================================================================
+// FILE DISCOVERY
+// ============================================================================
 
 function findBenchmarkReports(dir) {
     if (!fs.existsSync(dir)) {
@@ -75,7 +58,6 @@ function findBenchmarkReports(dir) {
 function processReports(reportFiles) {
     const promptData = {};
     const consolidatedData = {};
-    const comboFirstSeen = new Set();
 
     console.log(`\n📊 Reading ${reportFiles.length} report file(s)...\n`);
 
@@ -106,10 +88,6 @@ function processReports(reportFiles) {
                 if (!r.success) return;
 
                 const key = `${r.serverVersion}|${r.modelName}`;
-                const isFirstOccurrence = !comboFirstSeen.has(key);
-                if (isFirstOccurrence) {
-                    comboFirstSeen.add(key);
-                }
 
                 if (!consolidatedData[key]) {
                     consolidatedData[key] = {
@@ -119,19 +97,14 @@ function processReports(reportFiles) {
                     };
                 }
 
-                // Model load time only on first occurrence of this server×model combo
-                const modelLoadTime = isFirstOccurrence
-                    ? estimateModelLoadTime(r.ttftMs, r.responseLength, r.tokenCount)
-                    : 0;
-
+                // Use actual measured model load time from benchmark data
                 consolidatedData[key].results.push({
                     prompt: promptName,
                     ttft: r.ttftMs,
                     totalTime: r.totalMs,
                     responseLength: r.responseLength,
                     tokenCount: r.tokenCount,
-                    modelLoadTime: modelLoadTime,
-                    isFirstOccurrence: isFirstOccurrence,
+                    modelLoadTime: r.modelLoadTimeMs || 0,
                 });
             });
 
@@ -229,9 +202,8 @@ function generateConsolidatedReport(consolidatedData) {
 
         const headers = ['Model', 'Load Time', 'Avg TTFT', 'Avg Total', 'Avg Chars', 'Avg Tokens', 'Tests'];
         const rows = items.map(item => {
-            // Model load time: only from first occurrence
-            const firstLoadResult = item.results.find(r => r.isFirstOccurrence);
-            const loadTime = firstLoadResult ? (firstLoadResult.modelLoadTime || 0) : 0;
+            // All results for a server×model combo share the same modelLoadTime (measured once at startup)
+            const loadTime = item.results[0]?.modelLoadTime || 0;
             
             const avgTtft = item.results.reduce((s, r) => s + (r.ttft || 0), 0) / item.results.length;
             const avgTotal = item.results.reduce((s, r) => s + (r.totalTime || 0), 0) / item.results.length;
@@ -271,9 +243,8 @@ function generatePerModelComparison(consolidatedData) {
 
         const headers = ['Server', 'Load Time', 'Avg TTFT', 'Avg Total', 'Avg Chars', 'Avg Tokens'];
         const rows = items.map(item => {
-            // Model load time: only from first occurrence
-            const firstLoadResult = item.results.find(r => r.isFirstOccurrence);
-            const loadTime = firstLoadResult ? (firstLoadResult.modelLoadTime || 0) : 0;
+            // All results for a server×model combo share the same modelLoadTime (measured once at startup)
+            const loadTime = item.results[0]?.modelLoadTime || 0;
             
             const avgTtft = item.results.reduce((s, r) => s + (r.ttft || 0), 0) / item.results.length;
             const avgTotal = item.results.reduce((s, r) => s + (r.totalTime || 0), 0) / item.results.length;
@@ -302,15 +273,17 @@ function generateSummaryStats(consolidatedData, promptData) {
 
     const allItems = Object.values(consolidatedData);
     const allResults = allItems.flatMap(item => item.results);
-    const firstOccurrenceLoads = allResults.filter(r => r.isFirstOccurrence && r.modelLoadTime).map(r => r.modelLoadTime);
+    
+    // Collect all unique server×model load times (each combo loads model once)
+    const loadTimes = allItems.map(item => item.results[0]?.modelLoadTime || 0).filter(t => t > 0);
 
     if (allResults.length === 0) {
         return markdown + '_No data available_\n';
     }
 
-    const fastestLoad = firstOccurrenceLoads.length > 0 ? Math.min(...firstOccurrenceLoads) : 0;
-    const slowestLoad = firstOccurrenceLoads.length > 0 ? Math.max(...firstOccurrenceLoads) : 0;
-    const avgLoad = firstOccurrenceLoads.length > 0 ? firstOccurrenceLoads.reduce((a, b) => a + b, 0) / firstOccurrenceLoads.length : 0;
+    const fastestLoad = loadTimes.length > 0 ? Math.min(...loadTimes) : 0;
+    const slowestLoad = loadTimes.length > 0 ? Math.max(...loadTimes) : 0;
+    const avgLoad = loadTimes.length > 0 ? loadTimes.reduce((a, b) => a + b, 0) / loadTimes.length : 0;
 
     const fastestTTFT = Math.min(...allResults.map(r => r.ttft || Infinity));
     const slowestTTFT = Math.max(...allResults.map(r => r.ttft || 0));
@@ -330,7 +303,7 @@ function generateSummaryStats(consolidatedData, promptData) {
     markdown += `|--------|-------|\n`;
     markdown += `| **Total Test Results** | ${allResults.length} |\n`;
     markdown += `| **Model × Server Combos** | ${allItems.length} |\n`;
-    markdown += `| **First Load Tests** | ${firstOccurrenceLoads.length} |\n`;
+    markdown += `| **Unique Model Loads** | ${loadTimes.length} |\n`;
     markdown += `| **Prompts Tested** | ${Object.keys(promptData).length} |\n`;
     markdown += `| **Fastest Model Load** | ${formatSeconds(fastestLoad)} |\n`;
     markdown += `| **Slowest Model Load** | ${formatSeconds(slowestLoad)} |\n`;
@@ -355,8 +328,8 @@ function generateRankings(consolidatedData) {
 
     const items = Object.values(consolidatedData)
         .map(item => {
-            const firstLoadResult = item.results.find(r => r.isFirstOccurrence);
-            const loadTime = firstLoadResult ? (firstLoadResult.modelLoadTime || 0) : 0;
+            // All results for a server×model combo share the same measured modelLoadTime
+            const loadTime = item.results[0]?.modelLoadTime || 0;
             const avgTtft = item.results.reduce((s, r) => s + (r.ttft || 0), 0) / item.results.length;
             const avgTotal = item.results.reduce((s, r) => s + (r.totalTime || 0), 0) / item.results.length;
             const avgChars = item.results.reduce((s, r) => s + (r.responseLength || 0), 0) / item.results.length;
