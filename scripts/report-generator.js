@@ -75,6 +75,7 @@ function findBenchmarkReports(dir) {
 function processReports(reportFiles) {
     const promptData = {};
     const consolidatedData = {};
+    const comboFirstSeen = new Set();
 
     console.log(`\n📊 Reading ${reportFiles.length} report file(s)...\n`);
 
@@ -105,6 +106,11 @@ function processReports(reportFiles) {
                 if (!r.success) return;
 
                 const key = `${r.serverVersion}|${r.modelName}`;
+                const isFirstOccurrence = !comboFirstSeen.has(key);
+                if (isFirstOccurrence) {
+                    comboFirstSeen.add(key);
+                }
+
                 if (!consolidatedData[key]) {
                     consolidatedData[key] = {
                         serverVersion: r.serverVersion,
@@ -113,13 +119,19 @@ function processReports(reportFiles) {
                     };
                 }
 
+                // Model load time only on first occurrence of this server×model combo
+                const modelLoadTime = isFirstOccurrence
+                    ? estimateModelLoadTime(r.ttftMs, r.responseLength, r.tokenCount)
+                    : 0;
+
                 consolidatedData[key].results.push({
                     prompt: promptName,
                     ttft: r.ttftMs,
                     totalTime: r.totalMs,
                     responseLength: r.responseLength,
                     tokenCount: r.tokenCount,
-                    modelLoadTime: estimateModelLoadTime(r.ttftMs, r.responseLength, r.tokenCount),
+                    modelLoadTime: modelLoadTime,
+                    isFirstOccurrence: isFirstOccurrence,
                 });
             });
 
@@ -176,22 +188,20 @@ function generatePerPromptTables(promptData) {
         Object.entries(byServer).forEach(([server, serverResults]) => {
             markdown += `#### ${server}\n\n`;
 
-            const headers = ['Model', 'Model Load', 'TTFT', 'Total', 'Chars', 'Tokens'];
+            const headers = ['Model', 'Model Load*', 'TTFT', 'Total', 'Chars', 'Tokens'];
             const rows = serverResults
                 .sort((a, b) => a.modelName.localeCompare(b.modelName))
-                .map(r => {
-                    const modelLoadTime = estimateModelLoadTime(r.ttftMs, r.responseLength, r.tokenCount);
-                    return [
-                        r.modelName,
-                        formatSeconds(modelLoadTime),
-                        formatSeconds(r.ttftMs),
-                        formatSeconds(r.totalMs),
-                        formatNumber(r.responseLength),
-                        formatNumber(r.tokenCount),
-                    ];
-                });
+                .map(r => [
+                    r.modelName,
+                    formatSeconds(r.modelLoadTime || 0),
+                    formatSeconds(r.ttft),
+                    formatSeconds(r.totalTime),
+                    formatNumber(r.responseLength),
+                    formatNumber(r.tokenCount),
+                ]);
 
             markdown += formatTable(headers, rows);
+            markdown += '_*Model Load is measured at first spawn; cached on subsequent prompts_\n';
             markdown += '\n';
         });
     });
@@ -217,9 +227,12 @@ function generateConsolidatedReport(consolidatedData) {
     Object.entries(byServer).forEach(([server, items]) => {
         markdown += `### ${server}\n\n`;
 
-        const headers = ['Model', 'Avg Load', 'Avg TTFT', 'Avg Total', 'Avg Chars', 'Avg Tokens', 'Tests'];
+        const headers = ['Model', 'Load Time', 'Avg TTFT', 'Avg Total', 'Avg Chars', 'Avg Tokens', 'Tests'];
         const rows = items.map(item => {
-            const avgLoad = item.results.reduce((s, r) => s + (r.modelLoadTime || 0), 0) / item.results.length;
+            // Model load time: only from first occurrence
+            const firstLoadResult = item.results.find(r => r.isFirstOccurrence);
+            const loadTime = firstLoadResult ? (firstLoadResult.modelLoadTime || 0) : 0;
+            
             const avgTtft = item.results.reduce((s, r) => s + (r.ttft || 0), 0) / item.results.length;
             const avgTotal = item.results.reduce((s, r) => s + (r.totalTime || 0), 0) / item.results.length;
             const avgChars = item.results.reduce((s, r) => s + (r.responseLength || 0), 0) / item.results.length;
@@ -227,7 +240,7 @@ function generateConsolidatedReport(consolidatedData) {
 
             return [
                 item.modelName,
-                formatSeconds(avgLoad),
+                formatSeconds(loadTime),
                 formatSeconds(avgTtft),
                 formatSeconds(avgTotal),
                 formatNumber(avgChars),
@@ -237,6 +250,7 @@ function generateConsolidatedReport(consolidatedData) {
         });
 
         markdown += formatTable(headers, rows);
+        markdown += '_Load Time: measured from llama-server spawn to first response (0 = already cached)\n';
         markdown += '\n';
     });
 
@@ -255,9 +269,12 @@ function generatePerModelComparison(consolidatedData) {
     Object.entries(byModel).forEach(([modelName, items]) => {
         markdown += `### ${modelName}\n\n`;
 
-        const headers = ['Server', 'Avg Load', 'Avg TTFT', 'Avg Total', 'Avg Chars', 'Avg Tokens'];
+        const headers = ['Server', 'Load Time', 'Avg TTFT', 'Avg Total', 'Avg Chars', 'Avg Tokens'];
         const rows = items.map(item => {
-            const avgLoad = item.results.reduce((s, r) => s + (r.modelLoadTime || 0), 0) / item.results.length;
+            // Model load time: only from first occurrence
+            const firstLoadResult = item.results.find(r => r.isFirstOccurrence);
+            const loadTime = firstLoadResult ? (firstLoadResult.modelLoadTime || 0) : 0;
+            
             const avgTtft = item.results.reduce((s, r) => s + (r.ttft || 0), 0) / item.results.length;
             const avgTotal = item.results.reduce((s, r) => s + (r.totalTime || 0), 0) / item.results.length;
             const avgChars = item.results.reduce((s, r) => s + (r.responseLength || 0), 0) / item.results.length;
@@ -265,7 +282,7 @@ function generatePerModelComparison(consolidatedData) {
 
             return [
                 item.serverVersion,
-                formatSeconds(avgLoad),
+                formatSeconds(loadTime),
                 formatSeconds(avgTtft),
                 formatSeconds(avgTotal),
                 formatNumber(avgChars),
@@ -285,10 +302,15 @@ function generateSummaryStats(consolidatedData, promptData) {
 
     const allItems = Object.values(consolidatedData);
     const allResults = allItems.flatMap(item => item.results);
+    const firstOccurrenceLoads = allResults.filter(r => r.isFirstOccurrence && r.modelLoadTime).map(r => r.modelLoadTime);
 
     if (allResults.length === 0) {
         return markdown + '_No data available_\n';
     }
+
+    const fastestLoad = firstOccurrenceLoads.length > 0 ? Math.min(...firstOccurrenceLoads) : 0;
+    const slowestLoad = firstOccurrenceLoads.length > 0 ? Math.max(...firstOccurrenceLoads) : 0;
+    const avgLoad = firstOccurrenceLoads.length > 0 ? firstOccurrenceLoads.reduce((a, b) => a + b, 0) / firstOccurrenceLoads.length : 0;
 
     const fastestTTFT = Math.min(...allResults.map(r => r.ttft || Infinity));
     const slowestTTFT = Math.max(...allResults.map(r => r.ttft || 0));
@@ -308,7 +330,11 @@ function generateSummaryStats(consolidatedData, promptData) {
     markdown += `|--------|-------|\n`;
     markdown += `| **Total Test Results** | ${allResults.length} |\n`;
     markdown += `| **Model × Server Combos** | ${allItems.length} |\n`;
+    markdown += `| **First Load Tests** | ${firstOccurrenceLoads.length} |\n`;
     markdown += `| **Prompts Tested** | ${Object.keys(promptData).length} |\n`;
+    markdown += `| **Fastest Model Load** | ${formatSeconds(fastestLoad)} |\n`;
+    markdown += `| **Slowest Model Load** | ${formatSeconds(slowestLoad)} |\n`;
+    markdown += `| **Average Model Load** | ${formatSeconds(avgLoad)} |\n`;
     markdown += `| **Fastest TTFT** | ${formatSeconds(fastestTTFT)} |\n`;
     markdown += `| **Slowest TTFT** | ${formatSeconds(slowestTTFT)} |\n`;
     markdown += `| **Average TTFT** | ${formatSeconds(avgTTFT)} |\n`;
@@ -328,13 +354,36 @@ function generateRankings(consolidatedData) {
     let markdown = `## 🏅 Performance Rankings\n\n`;
 
     const items = Object.values(consolidatedData)
-        .map(item => ({
-            ...item,
-            avgTtft: item.results.reduce((s, r) => s + (r.ttft || 0), 0) / item.results.length,
-            avgTotal: item.results.reduce((s, r) => s + (r.totalTime || 0), 0) / item.results.length,
-            avgChars: item.results.reduce((s, r) => s + (r.responseLength || 0), 0) / item.results.length,
-            avgTokens: item.results.reduce((s, r) => s + (r.tokenCount || 0), 0) / item.results.length,
-        }));
+        .map(item => {
+            const firstLoadResult = item.results.find(r => r.isFirstOccurrence);
+            const loadTime = firstLoadResult ? (firstLoadResult.modelLoadTime || 0) : 0;
+            const avgTtft = item.results.reduce((s, r) => s + (r.ttft || 0), 0) / item.results.length;
+            const avgTotal = item.results.reduce((s, r) => s + (r.totalTime || 0), 0) / item.results.length;
+            const avgChars = item.results.reduce((s, r) => s + (r.responseLength || 0), 0) / item.results.length;
+            const avgTokens = item.results.reduce((s, r) => s + (r.tokenCount || 0), 0) / item.results.length;
+
+            return {
+                modelName: item.modelName,
+                serverVersion: item.serverVersion,
+                loadTime,
+                avgTtft,
+                avgTotal,
+                avgChars,
+                avgTokens,
+            };
+        });
+
+    // Fastest Model Load (first spawn)
+    markdown += `### 🚀 Fastest Model Load Time (Server Spawn)\n\n`;
+    items
+        .filter(item => item.loadTime > 0)
+        .sort((a, b) => a.loadTime - b.loadTime)
+        .slice(0, 5)
+        .forEach((item, idx) => {
+            const medal = ['🥇', '🥈', '🥉'][idx] || `${idx + 1}.`;
+            markdown += `${medal} **${item.modelName}** (${item.serverVersion}): ${formatSeconds(item.loadTime)}\n`;
+        });
+    markdown += '\n';
 
     // Fastest TTFT
     markdown += `### ⚡ Fastest Time to First Token\n\n`;
