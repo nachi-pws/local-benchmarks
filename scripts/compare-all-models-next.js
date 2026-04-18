@@ -488,6 +488,11 @@ class ModelTester {
             const lines = buffer.split('\n');
             buffer = lines.pop();  // Keep incomplete line in buffer
             
+            // Safety: cap incomplete line buffer at 10KB to prevent memory bloat
+            if (buffer.length > 10240) {
+                buffer = buffer.substring(buffer.length - 10240);
+            }
+            
             // Process complete lines
             for (let i = 0; i < lines.length; i++) {
                 if (streamEnded) break;  // Stop processing if complete
@@ -533,6 +538,15 @@ class ModelTester {
                         if (result.tokenCount % 50 === 0) {
                             process.stdout.write(`[${result.tokenCount}]`);
                         }
+                    }
+                    
+                    // Hard limit: cap response at 65536 characters to prevent endless loops
+                    if (result.response.length >= 65536) {
+                        if (VERBOSE_SERVER_OUTPUT) {
+                            console.log(`\n   [DEBUG] Response reached max character limit (65536 chars), stopping stream`);
+                        }
+                        this._completeStreaming(streamTimeout, result, globalStart, req, resolve);
+                        break;
                     }
                     
                     // DEBUG: Log finish reason changes
@@ -636,6 +650,14 @@ class ModelTester {
                 return;
             }
             buffer += chunk.toString();
+            
+            // Hard limit: cap buffer at 256KB to prevent OOM from runaway responses
+            if (buffer.length > 262144) {
+                if (VERBOSE_SERVER_OUTPUT) {
+                    console.log(`\n   [DEBUG] Response buffer exceeded 256KB, truncating`);
+                }
+                buffer = buffer.substring(0, 262144);
+            }
         });
         
         res.on('end', () => {
@@ -674,8 +696,18 @@ class ModelTester {
                 result.response = text;
                 result.responseLength = text.length;
                 
+                // Hard limit: cap response at 65536 characters
+                if (result.response.length > 65536) {
+                    if (VERBOSE_SERVER_OUTPUT) {
+                        console.log(`\n   [DEBUG] Response exceeded max character limit (65536 chars), truncating`);
+                    }
+                    result.response = result.response.substring(0, 65536);
+                    result.responseLength = 65536;
+                    console.log(`   ⚠️  Response truncated to 65536 characters`);
+                }
+                
                 // Estimate tokens (rough: ~4 chars per token)
-                result.tokenCount = Math.ceil(text.length / 4);
+                result.tokenCount = Math.ceil(result.response.length / 4);
                 
                 result.success = true;
                 console.log(`   ⏱️  TTFT: ${(result.ttftMs / 1000).toFixed(3)}s (one-shot mode)`);
