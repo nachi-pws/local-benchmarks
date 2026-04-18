@@ -16,12 +16,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const VERBOSE_SERVER_OUTPUT = true;  // Set to false to suppress server logs
 
-// Parse command line arguments for starting combination
+// Parse command line arguments for starting combination and prompt selection
 const args = process.argv.slice(2);
 const startFromArg = args.find(arg => arg.startsWith('--start='));
+const promptArg = args.find(arg => arg.startsWith('--prompt='));
+const noWaitArg = args.find(arg => arg === '--no-wait');
+
 const START_FROM_COMBINATION = startFromArg 
     ? parseInt(startFromArg.split('=')[1]) 
     : 1;
+
+const PROMPT_ID = promptArg 
+    ? parseInt(promptArg.split('=')[1]) 
+    : null;
+
+const NO_WAIT = noWaitArg !== undefined;
 
 if (START_FROM_COMBINATION < 1) {
     console.error('❌ Error: --start must be >= 1');
@@ -78,6 +87,19 @@ function displayPrompts() {
 }
 
 async function selectPrompt() {
+    // If prompt ID provided via CLI, use it directly
+    if (PROMPT_ID !== null) {
+        const selectedPrompt = promptConfig.prompts.find(p => p.id === PROMPT_ID);
+        
+        if (!selectedPrompt) {
+            console.error(`❌ Invalid prompt ID: ${PROMPT_ID}`);
+            process.exit(1);
+        }
+        
+        return selectedPrompt;
+    }
+    
+    // Otherwise, show interactive selection
     displayPrompts();
     
     const rl = readline.createInterface({
@@ -981,18 +1003,22 @@ async function main() {
     }
     console.log('');
     
-    // Confirm before starting
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
-    
-    await new Promise((resolve) => {
-        rl.question('Press ENTER to start benchmark (or Ctrl+C to cancel)... ', () => {
-            rl.close();
-            resolve();
+    // Confirm before starting (unless --no-wait is provided)
+    if (!NO_WAIT) {
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
         });
-    });
+        
+        await new Promise((resolve) => {
+            rl.question('Press ENTER to start benchmark (or Ctrl+C to cancel)... ', () => {
+                rl.close();
+                resolve();
+            });
+        });
+    } else {
+        console.log('⏭️  Auto-starting benchmark (--no-wait enabled)...');
+    }
     
     // Step 4: Run all tests
     const serverManager = new LlamaServerManager();
