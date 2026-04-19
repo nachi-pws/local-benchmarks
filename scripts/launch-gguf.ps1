@@ -3,11 +3,29 @@
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
+# Parameter parsing
+param(
+    [switch]$Network,
+    [switch]$Help
+)
+
+if ($Help) {
+    Write-Host ""
+    Write-Host "GGUF Model Launcher - Usage:" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  .\launch-gguf.ps1              Start server on localhost (127.0.0.1) - local access only" -ForegroundColor White
+    Write-Host "  .\launch-gguf.ps1 --network    Start server on all interfaces (0.0.0.0) - network accessible" -ForegroundColor White
+    Write-Host "  .\launch-gguf.ps1 --help       Show this help message" -ForegroundColor White
+    Write-Host ""
+    exit 0
+}
+
 $ConfigPath = Join-Path $PSScriptRoot "launchConfig.json"
 $GlobalServerStatus = @{
     ProcessId = $null
     ProcessObject = $null
     Running = $false
+    BindAddress = if ($Network) { "0.0.0.0" } else { "127.0.0.1" }
 }
 
 function Load-Configuration {
@@ -378,6 +396,15 @@ function Main {
     Write-Host "                  GGUF MODEL LAUNCHER                       " -ForegroundColor Magenta
     Write-Host "              Powered by llama.cpp & llama-server           " -ForegroundColor Magenta
     Write-Host "=============================================================" -ForegroundColor Magenta
+    Write-Host ""
+    
+    $bindMode = if ($GlobalServerStatus.BindAddress -eq "127.0.0.1") { 
+        "LOCALHOST (local access only)"
+    } else { 
+        "NETWORK (accessible from other machines)"
+    }
+    Write-Host "Binding Mode: $bindMode" -ForegroundColor Yellow
+    Write-Host ""
     
     $config = Load-Configuration
     
@@ -403,18 +430,18 @@ function Main {
     Display-ModelParameters -Model $selectedModel -LlamaServerVersion $selectedVersion -LlamaServerPath $llamaServerPath
     
     Write-Host "Checking if llama-server is already running..." -ForegroundColor Cyan
-    if (Test-ServerRunning -ServerHost $config.server.host -ServerPort $config.server.port -HealthEndpoint $config.server.health_check_endpoint -TimeoutMs 2000) {
+    if (Test-ServerRunning -ServerHost $GlobalServerStatus.BindAddress -ServerPort $config.server.port -HealthEndpoint $config.server.health_check_endpoint -TimeoutMs 2000) {
         Write-Host "[OK] Server already running on port $($config.server.port)" -ForegroundColor Green
         Write-Host "     Skipping startup (server is ready)" -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "API Endpoint: http://$($config.server.host):$($config.server.port)/completion" -ForegroundColor Cyan
+        Write-Host "API Endpoint: http://$($GlobalServerStatus.BindAddress):$($config.server.port)/completion" -ForegroundColor Cyan
         Write-Host ""
         $GlobalServerStatus.Running = $true
     }
     else {
         Write-Host "[INFO] No existing instance found, starting new server..." -ForegroundColor Yellow
         
-        $process = Start-LlamaServer -LlamaServerPath $llamaServerPath -ModelPath $selectedModel.path -Parameters $selectedModel.parameters -ServerHost $config.server.host -ServerPort $config.server.port
+        $process = Start-LlamaServer -LlamaServerPath $llamaServerPath -ModelPath $selectedModel.path -Parameters $selectedModel.parameters -ServerHost $GlobalServerStatus.BindAddress -ServerPort $config.server.port
         
         if ($process -eq $null) {
             Write-Host "[FAIL] Could not start llama-server" -ForegroundColor Red
@@ -434,8 +461,9 @@ function Main {
     Write-Host "=============================================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "Model:        $($selectedModel.name)" -ForegroundColor Green
-    Write-Host "API Endpoint: http://$($config.server.host):$($config.server.port)/completion" -ForegroundColor Green
+    Write-Host "API Endpoint: http://$($GlobalServerStatus.BindAddress):$($config.server.port)/completion" -ForegroundColor Green
     Write-Host "PID:          $($GlobalServerStatus.ProcessId)" -ForegroundColor Green
+    Write-Host "Binding:      $($GlobalServerStatus.BindAddress)" -ForegroundColor Green
     Write-Host ""
     Write-Host "=============================================================" -ForegroundColor Green
     Write-Host "  Press Ctrl+C to gracefully shutdown the server           " -ForegroundColor Green
