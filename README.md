@@ -41,6 +41,14 @@ All scripts can be run from **any directory** - no need to `cd scripts`!
 
 *Requires llama-server running on localhost:8000
 
+### Utility Commands
+
+| Command | Purpose | Usage |
+|---------|---------|-------|
+| `.\launch-gguf.ps1` | Interactive model launcher for separate testing | See [Launching Individual Models](#launching-individual-models-for-testing) below |
+
+**Note**: Utility scripts must be run from the `scripts/` directory using PowerShell.
+
 ### Script Details
 
 #### 1. Multi-Model Benchmark
@@ -250,6 +258,148 @@ node scripts/compare-all-models-next.js --prompt=1 --start=43
 | "Reports directory not found" | Scripts auto-create it; or manually: `mkdir reports` |
 
 For detailed troubleshooting, see [PREREQUISITES-AND-PREP.md](PREREQUISITES-AND-PREP.md).
+
+## Launching Individual Models for Testing
+
+The `launch-gguf.ps1` script allows you to interactively launch specific models with llama-server for isolated testing or API experimentation.
+
+### Basic Usage
+
+```powershell
+# From scripts directory
+cd D:\Project-Learning\local-benchmarks\scripts
+.\launch-gguf.ps1
+```
+
+### Interactive Selection
+
+When you run the script, it will prompt you to:
+
+1. **Select a Model** (1-10):
+   ```
+   [1] Qwen3-Coder-30B-A3B
+   [2] Gemma-4-31B
+   [3] Qwen3-VL-30B-A3B
+   [4] GLM-4.6V-Flash
+   [5] LFM2-24B-A2B
+   [6] Qwen3.5-9B
+   [7] Devstral-Small-2-24B-Instruct
+   [8] Qwen3.5-27B
+   [9] Qwen3-Coder-Next-UD-Q5_K_M ⚠️ Requires vulkan-b8672+
+   [10] Nemotron-3-Nano-30B-A3B
+   ```
+
+2. **Select llama-server Version**:
+   - HIP-b8838 (HIP Radeon with recent fixes)
+   - vulkan-b8672 (Vulkan - RECOMMENDED for Strix Halo)
+   - HIP-b8665 (Legacy - avoid for Qwen3-Coder-Next)
+
+3. **Review Configuration** and confirm startup
+
+### Testing a Specific Model
+
+```powershell
+# Launch Qwen3-Coder-Next (model 9)
+.\launch-gguf.ps1
+# Enter: 9
+# Select version: 2 (vulkan-b8672)
+```
+
+### Server is Ready When
+
+The script will:
+- Display model loading progress in console
+- Perform health checks via `/slots` endpoint
+- Transition from `503 Service Unavailable` to `200 OK`
+- Display final startup summary with parameter details
+- Open interactive llama-server shell
+
+Once ready, you can:
+- Test the API via `curl` or Postman on `http://localhost:8000`
+- Send requests to `/v1/chat/completions` (OpenAI-compatible endpoint)
+- Use `/v1/completions` for raw text completion
+
+### Example: Quick API Test
+
+```bash
+# In a separate terminal, while server is running
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "current",
+    "messages": [{"role": "user", "content": "Hello, what is Rust?"}],
+    "temperature": 0.7,
+    "max_tokens": 200
+  }'
+```
+
+### Stopping the Server
+
+Simply press `Ctrl+C` in the llama-server terminal to gracefully shutdown.
+
+---
+
+## Server Startup: Understanding 503 Errors
+
+### What Are the "503 Service Unavailable" Errors?
+
+When launching a model with `launch-gguf.ps1`, you may see repeated messages like:
+
+```
+srv  log_server_r: done request: GET /slots 127.0.0.1 503
+  Attempt 1/180 (elapsed: 32s)...
+srv  log_server_r: done request: GET /slots 127.0.0.1 503
+  Attempt 2/180 (elapsed: 34s)...
+```
+
+**These are completely normal and expected.**
+
+### Why It Happens
+
+1. **Model Loading in Progress**: The GGUF model is being loaded into GPU memory
+   - Large models (30B+) can take 30-120 seconds
+   - You'll see `load_tensors:` messages showing progress
+   - Example: `load_tensors: offloaded 49/49 layers to GPU`
+
+2. **Health Check Polling**: The script is automatically checking server readiness
+   - Polls `/slots` endpoint every 2 seconds
+   - Returns 503 while model loading is incomplete
+   - Retries up to 180 times (360 seconds total)
+
+3. **Not an Error**: The 503 response is the expected behavior during initialization
+   - The server intentionally returns 503 until fully ready
+   - This prevents incomplete requests during model loading
+
+### When Startup is Complete
+
+The script has succeeded when:
+- Status changes from `503` to `200 OK`
+- Model loading messages stop
+- Script displays the **STARTUP CONFIGURATION SUMMARY** section
+- Server opens an interactive shell, ready for requests
+
+### If Startup Times Out
+
+If you see `[ERROR] Max wait attempts exceeded` after 180 attempts:
+
+1. Check GPU memory:
+   ```powershell
+   # Verify GPU has enough VRAM free
+   Get-Process llama-server | Select-Object WorkingSet64
+   ```
+
+2. Verify llama-server executable path in `launchConfig.json`
+
+3. Try a smaller model first to rule out GPU issues:
+   - Model 6 (Qwen3.5-9B) or Model 5 (LFM2-24B) are faster to load
+
+4. Increase the timeout in `launchConfig.json`:
+   ```json
+   "max_wait_attempts": 300,
+   "startup_delay_ms": 60000
+   ```
+
+---
 
 ## Documentation
 
