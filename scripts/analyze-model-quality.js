@@ -4,6 +4,7 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { loadLaunchConfig } from './config-loader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -12,10 +13,9 @@ console.log('📊 Model Quality Analysis & Recommendations\n');
 // Load launch config
 let launchConfig = {};
 try {
-    const data = fs.readFileSync(path.join(__dirname, 'launchConfig.json'), 'utf8');
-    launchConfig = JSON.parse(data);
+    launchConfig = loadLaunchConfig();
 } catch (e) {
-    console.error('Failed to load launchConfig.json');
+    console.error('Failed to load launchConfig.json:', e.message);
     process.exit(1);
 }
 
@@ -132,13 +132,11 @@ request.on('error', (err) => {
     console.error('');
     console.error('llama-server is not running on http://localhost:8000');
     console.error('');
-    console.error('💡 Start llama-server first:');
-    console.error('   cd D:\\Project-Learning\\lailai-cli\\scripts');
-    console.error('   pwsh -File launch-qwen3coder.ps1');
-    console.error('');
-    console.error('   OR');
-    console.error('');
-    console.error('   pwsh -File launch-gguf.ps1');
+    console.error('💡 Start llama-server with a model loaded:');
+    console.error('   D:\\Llama-Server-Exes\\llama-b8672-bin-win-vulkan-x64\\llama-server.exe \\');
+    console.error('     --model "D:\\Large-Lang-Models\\Models\\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf" \\');
+    console.error('     --port 8000 \\');
+    console.error('     --n-gpu-layers 99');
     console.error('');
     process.exit(1);
 });

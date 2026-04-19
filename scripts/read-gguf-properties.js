@@ -5,6 +5,7 @@ import path from 'path';
 import readline from 'readline';
 import { fileURLToPath } from 'url';
 import { gguf } from '@huggingface/gguf';
+import { loadLaunchConfig } from './config-loader.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,13 +19,7 @@ const __dirname = path.dirname(__filename);
  * Load models from launchConfig.json
  */
 function loadModels() {
-  const configPath = path.join(__dirname, 'launchConfig.json');
-  
-  if (!fs.existsSync(configPath)) {
-    throw new Error(`launchConfig.json not found at ${configPath}`);
-  }
-
-  const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  const config = loadLaunchConfig();
   return config.models || [];
 }
 

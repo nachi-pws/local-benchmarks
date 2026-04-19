@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { parse as parseJsonc } from 'jsonc-parser';
+import { getRootDir, loadLaunchConfig, loadPromptConfig } from './config-loader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

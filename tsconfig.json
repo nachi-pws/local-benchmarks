@@ -13,6 +13,6 @@
     "sourceMap": false,
     "noEmit": true
   },
-  "include": ["scripts/**/*.js", "docs/**/*.js"],
+  "include": ["scripts/**/*.js", "docs/**/*.js", "read-gguf-properties.js", "report-generator.js", "run-all-benchmarks.js", "analyze-model-quality.js", "compare-all-models-next.js"],
   "exclude": ["node_modules", "dist", "archives"]
 }

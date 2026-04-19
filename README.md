@@ -6,8 +6,10 @@ A comprehensive suite of tools for benchmarking and analyzing local LLM (Large L
 
 - **Node.js**: 18.0.0 or higher
 - **npm**: 9.0.0 or higher
-- **Local LLM Server**: Running LLM server (e.g., Ollama, LLaMA Server) on localhost
 - **GGUF Models**: Compatible GGUF format model files
+- **llama-server**: Running on localhost:8000 (for some scripts)
+
+For detailed setup instructions, see [PREREQUISITES-AND-PREP.md](PREREQUISITES-AND-PREP.md).
 
 ## Quick Start
 
@@ -16,125 +18,277 @@ A comprehensive suite of tools for benchmarking and analyzing local LLM (Large L
    npm install
    ```
 
-2. **Run benchmarks**:
+2. **Configure models** in `scripts/launchConfig.json` and prompts in `scripts/promptConfig.json`
+
+3. **Run benchmarks**:
    ```bash
-   npm run benchmark:all
+   npm run benchmark:compare
    ```
 
 ## Available Scripts
 
-### Main Benchmarking Commands
+All scripts can be run from **any directory** - no need to `cd scripts`!
 
-| Command | Script | Purpose |
-|---------|--------|---------|
-| `npm run benchmark:all` | `run-all-benchmarks.js` | Run comprehensive benchmarks across all configured models |
-| `npm run benchmark:compare` | `compare-all-models-next.js` | Compare performance metrics between models |
-| `npm run analyze:quality` | `analyze-model-quality.js` | Analyze and provide recommendations for model quality |
-| `npm run report` | `report-generator.js` | Generate performance reports from benchmark data |
-| `npm run read:gguf` | `read-gguf-properties.js` | Read and display GGUF model properties |
+### Main Commands
 
-### Running Individual Scripts
+| Command | Purpose | Usage |
+|---------|---------|-------|
+| `npm run benchmark:compare` | Multi-model benchmark with prompt selection | `npm run benchmark:compare` or `node scripts/compare-all-models-next.js --prompt=1` |
+| `npm run benchmark:all` | Automated batch testing with logging | `npm run benchmark:all` |
+| `npm run analyze:quality` | Analyze current model quality* | `npm run analyze:quality` |
+| `npm run report` | Generate consolidated markdown report | `npm run report` |
+| `npm run read:gguf` | Inspect GGUF model metadata | `npm run read:gguf` |
 
-You can also run scripts directly:
+*Requires llama-server running on localhost:8000
 
+### Script Details
+
+#### 1. Multi-Model Benchmark
 ```bash
-node scripts/run-all-benchmarks.js
-node scripts/compare-all-models-next.js
-node scripts/analyze-model-quality.js
-node scripts/report-generator.js scripts/benchmark-report-*.json
-node scripts/read-gguf-properties.js /path/to/model.gguf
+# Interactive prompt selection
+npm run benchmark:compare
+
+# Specify prompt and auto-start
+node scripts/compare-all-models-next.js --prompt=1 --no-wait
+
+# Resume after interruption at combination #42
+node scripts/compare-all-models-next.js --prompt=1 --start=43
 ```
+
+Options: `--prompt=N`, `--start=N`, `--no-wait`, `--help`
+
+Output: Console + JSON report in `reports/benchmark-report-*.json`
+
+#### 2. Report Generator
+```bash
+# Use reports folder (default)
+npm run report
+
+# Or specify custom folder
+npm run report /path/to/reports
+```
+
+Input: `reports/*.json` files  
+Output: `reports/consolidated-report-*.md` (markdown)
+
+#### 3. Model Quality Analysis
+```bash
+npm run analyze:quality
+```
+
+Output: Console analysis + recommendations (requires llama-server)
+
+#### 4. Read GGUF Properties
+```bash
+npm run read:gguf
+```
+
+Interactive: Select model ID → Display all GGUF metadata
+
+#### 5. Batch Testing
+```bash
+npm run benchmark:all
+```
+
+Runs comprehensive tests with detailed logging to `scripts/run-all-benchmarks-*.log`
 
 ## Configuration
 
 ### Model Configuration (`scripts/launchConfig.json`)
 
-Define your models in `launchConfig.json`:
-
 ```json
 {
+  "llamaServerVersions": {
+    "default": "vulkan-b8672",
+    "available": {
+      "vulkan-b8672": {
+        "path": "D:\\Llama-Server-Exes\\llama-b8672-bin-win-vulkan-x64\\llama-server.exe",
+        "label": "Vulkan Build"
+      }
+    }
+  },
   "models": [
     {
-      "name": "Model Name",
-      "filename": "model-filename.gguf",
-      "parameters": "7B",
-      "description": "Model description"
+      "id": 1,
+      "name": "Qwen3-Coder-30B",
+      "filename": "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
+      "path": "D:\\Large-Lang-Models\\Models\\...",
+      "parameters": {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "top_k": 20,
+        "ctx_size": 65536,
+        "n_predict": -1,
+        "n_threads": 4,
+        "n_gpu_layers": 99,
+        "flash_attn": true,
+        "jinja": true
+      }
     }
   ]
 }
 ```
 
+See [PREREQUISITES-AND-PREP.md](PREREQUISITES-AND-PREP.md) for complete configuration guide.
+
 ### Prompt Configuration (`scripts/promptConfig.json`)
 
-Define test prompts in `promptConfig.json` for benchmarking consistency.
+```json
+{
+  "prompts": [
+    {
+      "id": 1,
+      "name": "TypeScript Basics",
+      "prompt": "What is TypeScript and why is it useful?",
+      "category": "basics",
+      "length": "short",
+      "streaming": true,
+      "enable_thinking": false
+    }
+  ]
+}
+```
 
-## Project Structure
+## Architecture
+
+### Path Resolution
+
+All scripts use a unified `config-loader.js` utility for consistent path resolution:
+
+- Works from any directory (root, scripts folder, or elsewhere)
+- Auto-discovers project root directory
+- Auto-creates reports folder if missing
+- Supports JSONC format in config files
+
+**Key Functions**:
+- `getRootDir()` - Project root directory
+- `getScriptsDir()` - Scripts folder path
+- `getReportsDir()` - Reports folder (auto-created)
+- `loadLaunchConfig()` - Load model config
+- `loadPromptConfig()` - Load prompt config
+
+### Project Structure
 
 ```
 local-benchmarks/
 ├── scripts/                          # Main JavaScript benchmark scripts
-│   ├── run-all-benchmarks.js        # Primary benchmark runner
-│   ├── compare-all-models-next.js   # Model comparison utility
-│   ├── analyze-model-quality.js     # Quality analysis tool
-│   ├── report-generator.js          # Report generation
-│   ├── read-gguf-properties.js      # GGUF property reader
-│   ├── launchConfig.json            # Model configurations
-│   ├── promptConfig.json            # Benchmark prompts
-│   └── benchmark-report-*.json      # Generated benchmark reports
-├── docs/                             # Documentation and guides
-├── archives/                         # Archived scripts and utilities
-├── package.json                      # Project dependencies
-├── tsconfig.json                     # TypeScript configuration
+│   ├── config-loader.js             # ⭐ Unified path resolver
+│   ├── compare-all-models-next.js   # Multi-model benchmark
+│   ├── run-all-benchmarks.js        # Batch testing
+│   ├── analyze-model-quality.js     # Quality analysis
+│   ├── report-generator.js          # Report consolidation
+│   ├── read-gguf-properties.js      # GGUF inspector
+│   ├── launchConfig.json            # Model & server config
+│   └── promptConfig.json            # Test prompts
+├── reports/                          # Generated reports (gitignored except sample/)
+│   ├── sample/                      # Sample reports (version controlled)
+│   ├── benchmark-report-*.json      # Generated JSON reports
+│   └── consolidated-report-*.md     # Generated markdown reports
+├── docs/                             # Documentation
+├── archives/                         # Archived utilities
+├── package.json                      # Dependencies
+├── PREREQUISITES-AND-PREP.md        # Setup guide
+├── PATH-RESOLUTION-REFACTOR.md      # Technical details
 └── README.md                         # This file
 ```
 
 ## Technology Stack
 
-- **Node.js**: JavaScript runtime for server-side execution
-- **ES Modules**: Modern JavaScript module system
-- **@huggingface/gguf**: GGUF file format parsing
-- **chalk**: Terminal output coloring
-- **jsonc-parser**: JSON with comments parsing
+- **Node.js**: Runtime
+- **ES Modules**: Modern JavaScript
+- **@huggingface/gguf**: GGUF file parsing
+- **chalk**: Terminal formatting
+- **jsonc-parser**: JSON with comments
+
+## Examples
+
+### Complete Workflow
+
+```bash
+# 1. Start from project root
+cd D:\Project-Learning\local-benchmarks
+
+# 2. Run benchmark with prompt selection
+npm run benchmark:compare
+# Select prompt 1: "TypeScript Basics"
+
+# 3. Wait for completion (reports save automatically)
+
+# 4. Generate consolidated report
+npm run report
+
+# 5. View results
+code reports/consolidated-report-*.md
+```
+
+### Multi-Prompt Testing
+
+```bash
+# Test multiple prompts
+node scripts/compare-all-models-next.js --prompt=1 --no-wait
+# [wait for completion]
+node scripts/compare-all-models-next.js --prompt=2 --no-wait
+
+# Consolidate all results
+npm run report
+```
+
+### Resume Interrupted Benchmark
+
+```bash
+# Interrupted at combination #42? Resume from #43
+node scripts/compare-all-models-next.js --prompt=1 --start=43
+```
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| "Cannot find module './config-loader.js'" | Run from root: `npm run benchmark:compare` or `node scripts/...` |
+| "launchConfig.json not found" | Verify files exist in `scripts/` with valid JSON |
+| "Cannot connect to llama-server" | Start llama-server first on localhost:8000 |
+| "Reports directory not found" | Scripts auto-create it; or manually: `mkdir reports` |
+
+For detailed troubleshooting, see [PREREQUISITES-AND-PREP.md](PREREQUISITES-AND-PREP.md).
+
+## Documentation
+
+- **[PREREQUISITES-AND-PREP.md](PREREQUISITES-AND-PREP.md)** - Complete setup guide with GGUF downloads, llama-server installation, config details
+- **[PATH-RESOLUTION-REFACTOR.md](scripts/PATH-RESOLUTION-REFACTOR.md)** - Technical details on path resolution system
+- **[docs/](docs/)** - Additional guides and analysis
+- **[archives/](archives/)** - Legacy scripts and utilities
 
 ## Features
 
-- ✅ Comprehensive LLM benchmarking
-- ✅ Multi-model comparison
-- ✅ Performance analysis and reporting
-- ✅ GGUF model property inspection
+- ✅ Multi-model & multi-server benchmarking
+- ✅ Performance analysis (TTFT, total time, token count)
 - ✅ Configurable test prompts
+- ✅ Automated report generation
+- ✅ GGUF metadata inspection
+- ✅ Consistent path resolution from any directory
+- ✅ Real-time streaming support
 - ✅ Detailed logging and metrics
 
 ## Development
 
 ### Type Checking
 
-Check JavaScript syntax and types:
-
 ```bash
 npx tsc --noEmit
 ```
 
-## Troubleshooting
+### Running Scripts Directly
 
-### Server Connection Issues
+```bash
+# From any directory with absolute path
+node D:\Project-Learning\local-benchmarks\scripts\compare-all-models-next.js
 
-Ensure your LLM server is running and accessible:
-- Default connection: `http://localhost:8000`
-- Check server status and available models
+# Or from project root
+node scripts/compare-all-models-next.js
 
-### Missing Configuration Files
-
-Ensure `launchConfig.json` and `promptConfig.json` exist in the `scripts/` directory with proper formatting.
-
-### Module Not Found Errors
-
-Run `npm install` to ensure all dependencies are installed.
-
-## Documentation
-
-- See [docs/](docs/) for detailed guides
-- Archives in [archives/](archives/) contain additional utilities and examples
+# Or from scripts directory
+cd scripts && node compare-all-models-next.js
+```
 
 ## License
 

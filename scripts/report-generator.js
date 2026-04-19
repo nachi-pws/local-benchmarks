@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { parse as parseJsonc } from 'jsonc-parser';
+import { getReportsDir, loadLaunchConfig, loadPromptConfig } from './config-loader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -12,7 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // ============================================================================
 
 const args = process.argv.slice(2);
-const folderPath = args[0] || path.join(__dirname, '..', 'reports');
+const folderPath = args[0] || getReportsDir();
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -463,17 +464,15 @@ async function main() {
     let launchConfig = {};
     let promptConfig = {};
     try {
-        launchConfig = parseJsonc(fs.readFileSync(path.join(__dirname, 'launchConfig.json'), 'utf8'));
-        promptConfig = parseJsonc(fs.readFileSync(path.join(__dirname, 'promptConfig.json'), 'utf8'));
+        launchConfig = loadLaunchConfig();
+        promptConfig = loadPromptConfig();
     } catch (err) {
         console.warn(`⚠️  Warning: Could not load config files (${err.message}). Overview section will be skipped.\n`);
     }
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
     const reportFilename = `consolidated-report-${timestamp}.md`;
-    const reportsDir = path.join(__dirname, '..', 'reports');
-    if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
-    const reportPath = path.join(reportsDir, reportFilename);
+    const reportPath = path.join(getReportsDir(), reportFilename);
 
     let markdown = `# 📊 Comprehensive Benchmark Consolidation Report\n\n`;
     markdown += `**Generated:** ${new Date().toLocaleString()}\n`;

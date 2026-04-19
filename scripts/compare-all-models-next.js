@@ -7,6 +7,7 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import readline from 'readline';
 import { parse as parseJsonc } from 'jsonc-parser';
+import { getRootDir, getReportsDir, loadLaunchConfig, loadPromptConfig } from './config-loader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,29 +39,15 @@ if (START_FROM_COMBINATION < 1) {
 }
 
 // ============================================================================
-// CONFIGURATION LOADER - JSONC Support
+// LOAD CONFIGURATION
 // ============================================================================
-
-function loadJsonc(filepath) {
-    try {
-        const data = fs.readFileSync(filepath, 'utf8');
-        const parsed = parseJsonc(data);
-        if (parsed === undefined) {
-            throw new Error('Failed to parse JSONC file');
-        }
-        return parsed;
-    } catch (err) {
-        console.error(`❌ Error parsing ${path.basename(filepath)}:`, err.message);
-        throw err;
-    }
-}
 
 let launchConfig = {};
 let promptConfig = {};
 
 try {
-    launchConfig = loadJsonc(path.join(__dirname, 'launchConfig.json'));
-    promptConfig = loadJsonc(path.join(__dirname, 'promptConfig.json'));
+    launchConfig = loadLaunchConfig();
+    promptConfig = loadPromptConfig();
 } catch (e) {
     console.error('❌ Failed to load configuration files:', e.message);
     process.exit(1);
@@ -925,9 +912,7 @@ class ResultsReporter {
     saveToFile() {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const filename = `benchmark-report-${timestamp}.json`;
-        const reportsDir = path.join(__dirname, '..', 'reports');
-        if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
-        const filepath = path.join(reportsDir, filename);
+        const filepath = path.join(getReportsDir(), filename);
         
         const reportData = {
             timestamp: new Date().toISOString(),
