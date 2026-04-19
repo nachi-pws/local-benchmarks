@@ -20,6 +20,11 @@ build/
 *.log
 logs/
 
+# Generated Reports (ignore all reports except sample folder)
+/reports/*
+!/reports/sample/
+!/reports/sample/**
+
 # Environment
 .env
 .env.local

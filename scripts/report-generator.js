@@ -12,7 +12,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // ============================================================================
 
 const args = process.argv.slice(2);
-const folderPath = args[0] || __dirname;
+const folderPath = args[0] || path.join(__dirname, '..', 'reports');
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -471,7 +471,9 @@ async function main() {
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
     const reportFilename = `consolidated-report-${timestamp}.md`;
-    const reportPath = path.join(__dirname, reportFilename);
+    const reportsDir = path.join(__dirname, '..', 'reports');
+    if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
+    const reportPath = path.join(reportsDir, reportFilename);
 
     let markdown = `# 📊 Comprehensive Benchmark Consolidation Report\n\n`;
     markdown += `**Generated:** ${new Date().toLocaleString()}\n`;

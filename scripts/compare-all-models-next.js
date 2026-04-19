@@ -925,7 +925,9 @@ class ResultsReporter {
     saveToFile() {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const filename = `benchmark-report-${timestamp}.json`;
-        const filepath = path.join(__dirname, filename);
+        const reportsDir = path.join(__dirname, '..', 'reports');
+        if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
+        const filepath = path.join(reportsDir, filename);
         
         const reportData = {
             timestamp: new Date().toISOString(),

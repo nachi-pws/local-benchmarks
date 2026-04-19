@@ -1,42 +1,34 @@
 {
-  "name": "lailai-cli",
+  "name": "local-benchmarks",
   "version": "1.0.0",
-  "description": "A TypeScript CLI application",
+  "description": "Local LLM benchmarking and model analysis tools",
   "type": "module",
-  "main": "./dist/index.js",
-  "exports": {
-    ".": "./dist/index.js"
-  },
-  "bin": {
-    "lailai": "./dist/index.js"
-  },
+  "main": "./scripts/run-all-benchmarks.js",
   "scripts": {
-    "dev": "tsx src/index.ts",
-    "build": "tsup src/index.ts --format esm --outDir dist --sourcemap",
-    "start": "node dist/index.js",
-    "type-check": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "benchmark:all": "node scripts/run-all-benchmarks.js",
+    "benchmark:compare": "node scripts/compare-all-models-next.js",
+    "analyze:quality": "node scripts/analyze-model-quality.js",
+    "report": "node scripts/report-generator.js",
+    "read:gguf": "node scripts/read-gguf-properties.js"
   },
   "keywords": [
-    "cli",
-    "typescript"
+    "benchmarks",
+    "llm",
+    "gguf",
+    "performance-testing"
   ],
   "author": "",
   "license": "MIT",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "@huggingface/gguf": "^0.4.1",
     "chalk": "^5.3.0",
-    "commander": "^12.0.0",
-    "jsonc-parser": "^3.3.1",
-    "zod": "^3.22.4"
+    "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {
     "@types/node": "^20.19.39",
-    "tsup": "^8.0.1",
-    "tsx": "^4.7.0",
     "typescript": "^5.3.3"
   }
 }
