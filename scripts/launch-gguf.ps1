@@ -48,8 +48,9 @@ function Show-ModelSelection {
     Write-Host ""
     $selection = Read-Host "Enter model number (1-$($Config.models.Count))"
     
-    if ([int]::TryParse($selection, [ref]$null) -and $selection -ge 1 -and $selection -le $Config.models.Count) {
-        return $Config.models[$selection - 1]
+    $selectionInt = 0
+    if ([int]::TryParse($selection, [ref]$selectionInt) -and $selectionInt -ge 1 -and $selectionInt -le $Config.models.Count) {
+        return $Config.models[$selectionInt - 1]
     }
     else {
         Write-Host "[ERROR] Invalid selection" -ForegroundColor Red
@@ -86,8 +87,9 @@ function Show-VersionSelection {
         return $Config.llamaServerVersions.default
     }
     
-    if ([int]::TryParse($selection, [ref]$null) -and $selection -ge 1 -and $selection -le $versionList.Count) {
-        return $versionList[$selection - 1]
+    $selectionInt = 0
+    if ([int]::TryParse($selection, [ref]$selectionInt) -and $selectionInt -ge 1 -and $selectionInt -le $versionList.Count) {
+        return $versionList[$selectionInt - 1]
     }
     else {
         Write-Host "[WARNING] Invalid selection, using default" -ForegroundColor Yellow
