@@ -8,6 +8,16 @@ param(
     [switch]$Help
 )
 
+# Handle case where flags are passed as positional arguments
+if ($Address -eq "--network") {
+    $Network = $true
+    $Address = $null
+}
+elseif ($Address -eq "--help") {
+    $Help = $true
+    $Address = $null
+}
+
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 if ($Help) {
