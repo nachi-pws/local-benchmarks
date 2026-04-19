@@ -323,7 +323,9 @@ function Wait-ServerReady {
         [string]$BindAddress
     )
     
-    $serverHost = $BindAddress
+    # Convert 0.0.0.0 to 127.0.0.1 for health check connections
+    # (0.0.0.0 is for binding/listening only, not for connecting TO)
+    $serverHost = if ($BindAddress -eq "0.0.0.0") { "127.0.0.1" } else { $BindAddress }
     $serverPort = $Config.server.port
     $healthEndpoint = $Config.server.health_check_endpoint
     $timeoutMs = $Config.server.health_check_timeout_ms
@@ -446,7 +448,8 @@ function Main {
     Display-ModelParameters -Model $selectedModel -LlamaServerVersion $selectedVersion -LlamaServerPath $llamaServerPath
     
     Write-Host "Checking if llama-server is already running..." -ForegroundColor Cyan
-    if (Test-ServerRunning -ServerHost $GlobalServerStatus.BindAddress -ServerPort $config.server.port -HealthEndpoint $config.server.health_check_endpoint -TimeoutMs 2000) {
+    $healthCheckAddress = if ($GlobalServerStatus.BindAddress -eq "0.0.0.0") { "127.0.0.1" } else { $GlobalServerStatus.BindAddress }
+    if (Test-ServerRunning -ServerHost $healthCheckAddress -ServerPort $config.server.port -HealthEndpoint $config.server.health_check_endpoint -TimeoutMs 2000) {
         Write-Host "[OK] Server already running on port $($config.server.port)" -ForegroundColor Green
         Write-Host "     Skipping startup (server is ready)" -ForegroundColor Yellow
         Write-Host ""
