@@ -1,3 +1,28 @@
+## 🖥️ Hardware & Platform Context
+
+> **📌 Important:** This comprehensive benchmark suite was specifically designed and tested for **AMD Ryzen GPU-equipped machines**. All performance metrics, configurations, and results documented here are based on testing conducted on the following hardware setup:
+
+### Test Hardware Configuration
+- **Machine:** GMKTec EVO-X2 Ryzen 395+ AI Machine
+- **CPU/GPU:** AMD Ryzen 395+ with RDNA 3.5 GPU (HIP-enabled)
+- **RAM:** 128 GB
+- **OS:** Windows 11
+- **GPU Drivers:** AMD Radeon Pro drivers with HIP support
+- **Server Builds Tested:** HIP-b8838, HIP-b8665, Vulkan-b8672
+
+### Multi-Platform Support
+This benchmark can also be executed on **Linux** by:
+1. **Dual-booting** the same machine to a pure Linux desktop environment (Ubuntu 22.04+ recommended)
+2. **Installing Linux versions** of all required software:
+   - Node.js (Linux build)
+   - llama-server (Linux HIP or Vulkan builds)
+   - GGUF model files (platform-agnostic, use same files)
+   - All utility scripts and dependencies
+
+**Linux Advantage:** Native HIP driver support and optimized Vulkan performance on AMD GPUs.
+
+---
+
 # Prerequisites and Setup Guide for Local Benchmarks
 
 ## 🎯 Quick Start Checklist
