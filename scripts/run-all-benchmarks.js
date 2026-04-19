@@ -9,6 +9,72 @@ import { parse as parseJsonc } from 'jsonc-parser';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ============================================================================
+// LOGGING SETUP
+// ============================================================================
+
+// Create log file with datetime format
+function getLogFilename() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    
+    return `run-all-benchmarks-${year}-${month}-${day}T${hours}-${minutes}-${seconds}.log`;
+}
+
+const logFilePath = path.join(__dirname, getLogFilename());
+let logFileStream = null;
+
+// Initialize log file stream
+try {
+    logFileStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+} catch (err) {
+    console.error(`❌ Error creating log file: ${err.message}`);
+}
+
+// Logging function that writes to both console and file
+function logToFile(message = '') {
+    if (logFileStream) {
+        logFileStream.write(message + '\n');
+    }
+}
+
+// Override console methods to log to both stdout and file
+const originalLog = console.log;
+const originalError = console.error;
+const originalWarn = console.warn;
+
+console.log = function(...args) {
+    const message = args.map(arg => 
+        typeof arg === 'string' ? arg : JSON.stringify(arg)
+    ).join(' ');
+    
+    originalLog(...args);
+    logToFile(message);
+};
+
+console.error = function(...args) {
+    const message = args.map(arg => 
+        typeof arg === 'string' ? arg : JSON.stringify(arg)
+    ).join(' ');
+    
+    originalError(...args);
+    logToFile(message);
+};
+
+console.warn = function(...args) {
+    const message = args.map(arg => 
+        typeof arg === 'string' ? arg : JSON.stringify(arg)
+    ).join(' ');
+    
+    originalLog(...args);
+    logToFile(message);
+};
+
+// ============================================================================
 // CONFIGURATION
 // ============================================================================
 
@@ -161,9 +227,21 @@ async function main() {
     console.log('║ ✅ BENCHMARK SUITE COMPLETE');
     console.log('║ All prompts tested and report generated successfully!');
     console.log('╚═══════════════════════════════════════════════════════════════════════════════╝\n');
+    console.log(`📝 Log file saved: ${logFilePath}\n`);
+    
+    // Close log file stream
+    if (logFileStream) {
+        logFileStream.end();
+    }
 }
 
 main().catch((err) => {
     console.error('\n❌ Fatal error:', err.message);
+    
+    // Close log file stream on error
+    if (logFileStream) {
+        logFileStream.end();
+    }
+    
     process.exit(1);
 });

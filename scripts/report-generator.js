@@ -3,6 +3,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { parse as parseJsonc } from 'jsonc-parser';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -18,7 +19,7 @@ const folderPath = args[0] || __dirname;
 // ============================================================================
 
 function formatSeconds(ms) {
-    if (!ms || ms < 0) return 'N/A';
+    if (ms === null || ms === undefined || ms < 0) return 'N/A';
     return (ms / 1000).toFixed(3) + 's';
 }
 
@@ -166,9 +167,9 @@ function generatePerPromptTables(promptData) {
                 .sort((a, b) => a.modelName.localeCompare(b.modelName))
                 .map(r => [
                     r.modelName,
-                    formatSeconds(r.modelLoadTime || 0),
-                    formatSeconds(r.ttft),
-                    formatSeconds(r.totalTime),
+                    formatSeconds(r.modelLoadTimeMs || 0),
+                    formatSeconds(r.ttftMs),
+                    formatSeconds(r.totalMs),
                     formatNumber(r.responseLength),
                     formatNumber(r.tokenCount),
                 ]);
@@ -394,6 +395,38 @@ function generateRankings(consolidatedData) {
     return markdown;
 }
 
+function generateTestingOverview(promptData, launchConfig, promptConfig) {
+    let markdown = `## 🧪 Testing Configuration Overview\n\n`;
+
+    // Prompts tested
+    markdown += `### 📝 Prompts Tested (${promptConfig.prompts.length})\n\n`;
+    promptConfig.prompts.forEach(p => {
+        const thinkingLabel = p.enable_thinking ? ' 🧠' : '';
+        markdown += `- **${p.name}** ${thinkingLabel}\n`;
+        markdown += `  - Category: ${p.category} | Length: ${p.length}\n`;
+        markdown += `  - **Prompt:** ${p.prompt}\n`;
+    });
+    markdown += '\n';
+
+    // Server versions/drivers
+    markdown += `### 🖥️ Llama-Server Versions\n\n`;
+    Object.entries(launchConfig.llamaServerVersions.available).forEach(([key, config]) => {
+        markdown += `- **${key}**\n`;
+        markdown += `  - ${config.label}\n`;
+    });
+    markdown += '\n';
+
+    // Models with parameter info
+    markdown += `### 🤖 Models Tested (${launchConfig.models.length})\n\n`;
+    launchConfig.models.forEach(model => {
+        markdown += `- **${model.name}**\n`;
+        markdown += `  - ${model.description}\n`;
+    });
+    markdown += '\n';
+
+    return markdown;
+}
+
 // ============================================================================
 // MAIN
 // ============================================================================
@@ -426,6 +459,16 @@ async function main() {
 
     console.log(`\n📝 Generating consolidated report...\n`);
 
+    // Load configuration files
+    let launchConfig = {};
+    let promptConfig = {};
+    try {
+        launchConfig = parseJsonc(fs.readFileSync(path.join(__dirname, 'launchConfig.json'), 'utf8'));
+        promptConfig = parseJsonc(fs.readFileSync(path.join(__dirname, 'promptConfig.json'), 'utf8'));
+    } catch (err) {
+        console.warn(`⚠️  Warning: Could not load config files (${err.message}). Overview section will be skipped.\n`);
+    }
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
     const reportFilename = `consolidated-report-${timestamp}.md`;
     const reportPath = path.join(__dirname, reportFilename);
@@ -441,6 +484,12 @@ async function main() {
     markdown += `- **Total Test Results:** ${Object.values(consolidatedData).reduce((s, item) => s + item.results.length, 0)}\n\n`;
 
     markdown += `---\n\n`;
+
+    // Add testing overview if configs are available
+    if (launchConfig.models && promptConfig.prompts) {
+        markdown += generateTestingOverview(promptData, launchConfig, promptConfig);
+        markdown += `---\n\n`;
+    }
     markdown += generateSummaryStats(consolidatedData, promptData);
     markdown += `---\n\n`;
     markdown += generateRankings(consolidatedData);
@@ -465,6 +514,7 @@ async function main() {
     console.log(`✅ Consolidated report saved!\n`);
     console.log(`📄 File: ${reportFilename}\n`);
     console.log(`📖 Report contains:\n`);
+    console.log(`   • Testing Configuration Overview\n`);
     console.log(`   • Key Metrics Summary\n`);
     console.log(`   • Performance Rankings (TTFT, Total Time, Verbosity)\n`);
     console.log(`   • Per-Prompt Analysis (${Object.keys(promptData).length} prompts)\n`);
