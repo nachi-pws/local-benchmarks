@@ -268,8 +268,31 @@ The `launch-gguf.ps1` script allows you to interactively launch specific models 
 ```powershell
 # From scripts directory
 cd D:\Project-Learning\local-benchmarks\scripts
+
+# Default: localhost only (secure, local development)
 .\launch-gguf.ps1
+
+# Network accessible: bind to 0.0.0.0 (remote machine access)
+.\launch-gguf.ps1 --network
+
+# Show help and available options
+.\launch-gguf.ps1 --help
 ```
+
+### Binding Modes
+
+**Default (`127.0.0.1` - Localhost Only)**
+- Only accepts local connections from the same machine
+- Secure for development and testing
+- Suitable for: Local API testing, personal experiments
+- Access: `http://127.0.0.1:8000`
+
+**Network Mode (`0.0.0.0` - All Interfaces)**
+- Accepts connections from any machine on your network
+- ⚠️ Use with caution on public networks
+- Suitable for: Team development, remote testing, cross-machine access
+- Access: `http://<your-ip>:8000` from other machines
+- Command: `.\launch-gguf.ps1 --network`
 
 ### Interactive Selection
 
@@ -305,29 +328,81 @@ When you run the script, it will prompt you to:
 # Select version: 2 (vulkan-b8672)
 ```
 
+### Server Startup Display
+
+The script shows binding mode at startup:
+
+```
+Binding Mode: LOCALHOST (local access only)
+
+...
+[READY] Server is ready!
+
+=============================================================
+               SERVER RUNNING SUCCESSFULLY
+=============================================================
+
+Model:        Qwen3-Coder-Next-UD-Q5_K_M
+API Endpoint: http://127.0.0.1:8000/completion
+PID:          27704
+Binding:      127.0.0.1
+
+=============================================================
+```
+
+Or with `--network` flag:
+
+```
+Binding Mode: NETWORK (accessible from other machines)
+
+...
+API Endpoint: http://0.0.0.0:8000/completion
+Binding:      0.0.0.0
+```
+
 ### Server is Ready When
 
 The script will:
-- Display model loading progress in console
+- Display binding mode at startup
+- Show model loading progress in console
 - Perform health checks via `/slots` endpoint
 - Transition from `503 Service Unavailable` to `200 OK`
-- Display final startup summary with parameter details
-- Open interactive llama-server shell
+- Display final startup summary with binding address and parameter details
 
 Once ready, you can:
-- Test the API via `curl` or Postman on `http://localhost:8000`
+- **Localhost mode** (`127.0.0.1`): Test the API locally via `curl` or Postman on `http://127.0.0.1:8000`
+- **Network mode** (`0.0.0.0`): Access from other machines using your machine's IP address (e.g., `http://192.168.1.100:8000`)
 - Send requests to `/v1/chat/completions` (OpenAI-compatible endpoint)
 - Use `/v1/completions` for raw text completion
 
-### Example: Quick API Test
+### Example: Quick API Test (Local)
 
 ```bash
-# In a separate terminal, while server is running
-curl -X POST http://localhost:8000/v1/chat/completions \
+# In a separate terminal, while server is running (localhost mode)
+curl -X POST http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "current",
     "messages": [{"role": "user", "content": "Hello, what is Rust?"}],
+    "temperature": 0.7,
+    "max_tokens": 200
+  }'
+```
+
+### Example: Network Access
+
+```powershell
+# Terminal 1: Start server in network mode
+.\launch-gguf.ps1 --network
+# Note the binding: http://0.0.0.0:8000 (or use your machine's actual IP)
+
+# Terminal 2: From another machine on the network
+# Replace 192.168.1.100 with your machine's actual IP address
+curl -X POST http://192.168.1.100:8000/v1/chat/completions `
+  -H "Content-Type: application/json" `
+  -d '{
+    "model": "current",
+    "messages": [{"role": "user", "content": "Hello from remote machine"}],
     "temperature": 0.7,
     "max_tokens": 200
   }'
