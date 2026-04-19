@@ -1,21 +1,24 @@
 #!/usr/bin/env pwsh
 # Launch GGUF models with llama-server with interactive model and version selection.
 
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-
-# Parameter parsing
+# Parameter parsing - MUST be first before any other code
 param(
+    [string]$Address,
     [switch]$Network,
     [switch]$Help
 )
+
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 if ($Help) {
     Write-Host ""
     Write-Host "GGUF Model Launcher - Usage:" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  .\launch-gguf.ps1              Start server on localhost (127.0.0.1) - local access only" -ForegroundColor White
-    Write-Host "  .\launch-gguf.ps1 --network    Start server on all interfaces (0.0.0.0) - network accessible" -ForegroundColor White
-    Write-Host "  .\launch-gguf.ps1 --help       Show this help message" -ForegroundColor White
+    Write-Host "  .\launch-gguf.ps1                      Start server on localhost (127.0.0.1) - local access only" -ForegroundColor White
+    Write-Host "  .\launch-gguf.ps1 --network            Start server on all interfaces (0.0.0.0) - network accessible" -ForegroundColor White
+    Write-Host "  .\launch-gguf.ps1 192.168.1.100        Start server on specific IP address" -ForegroundColor White
+    Write-Host "  .\launch-gguf.ps1 my-hostname.local    Start server on specific hostname" -ForegroundColor White
+    Write-Host "  .\launch-gguf.ps1 --help               Show this help message" -ForegroundColor White
     Write-Host ""
     exit 0
 }
@@ -25,7 +28,7 @@ $GlobalServerStatus = @{
     ProcessId = $null
     ProcessObject = $null
     Running = $false
-    BindAddress = if ($Network) { "0.0.0.0" } else { "127.0.0.1" }
+    BindAddress = if ($Address) { $Address } elseif ($Network) { "0.0.0.0" } else { "127.0.0.1" }
 }
 
 function Load-Configuration {
@@ -306,10 +309,11 @@ function Start-LlamaServer {
 function Wait-ServerReady {
     param(
         [object]$Config,
-        [object]$Process
+        [object]$Process,
+        [string]$BindAddress
     )
     
-    $serverHost = $Config.server.host
+    $serverHost = $BindAddress
     $serverPort = $Config.server.port
     $healthEndpoint = $Config.server.health_check_endpoint
     $timeoutMs = $Config.server.health_check_timeout_ms
@@ -400,8 +404,10 @@ function Main {
     
     $bindMode = if ($GlobalServerStatus.BindAddress -eq "127.0.0.1") { 
         "LOCALHOST (local access only)"
-    } else { 
-        "NETWORK (accessible from other machines)"
+    } elseif ($GlobalServerStatus.BindAddress -eq "0.0.0.0") { 
+        "NETWORK (accessible from all interfaces)"
+    } else {
+        "CUSTOM: $($GlobalServerStatus.BindAddress)"
     }
     Write-Host "Binding Mode: $bindMode" -ForegroundColor Yellow
     Write-Host ""
@@ -448,7 +454,7 @@ function Main {
             exit 1
         }
         
-        if (-not (Wait-ServerReady -Config $config -Process $process)) {
+        if (-not (Wait-ServerReady -Config $config -Process $process -BindAddress $GlobalServerStatus.BindAddress)) {
             Write-Host "[STOP] Terminating failed server process..." -ForegroundColor Yellow
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
             exit 1
