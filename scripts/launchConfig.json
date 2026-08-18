@@ -28,18 +28,17 @@
     {
       "id": 1,
       "name": "Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic",
-      "filename": "Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-Q8_0.gguf",
-      "path": "D:\\Large-Lang-Models\\Models\\Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-Q8_0.gguf",
-      "description": "Qwen3.6 27B Dense - Enhanced version exceeding base Qwen3.6 on 6/7 benchmarks. Agentic coding, reasoning, multilingual. 256K native context. Heretic uncensored.",
+      "filename": "Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-Q4_K_S.gguf",
+      "path": "D:\\Large-Lang-Models\\Models\\Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-Q4_K_S.gguf",
+      "description": "Qwen3.6 27B Fable-Fusion-711 (Heretic uncensored) - NEO IMATRIX Q4_K_S quant; performance-focused 4-bit quant with MTP options. License: apache-2.0",
       "notes": [
-        "DENSE 27B: all params active every token — heavier than Qwen3.5-27B, optimized for reasoning/coding",
-        "Heretic uncensored: decensored version using Arbitrary-Rank Ablation (ARA) method with minimal quality loss (KL div 0.0469)",
-        "Fable-Fusion-711: Fine-tuned multi-stage merge exceeding Qwen3.6-27B on 6/7 benchmarks, ARC-C scores 71+ (700+ club)",
-        "NEO IMATRIX Q8_0: Output tensor in F16 precision (10-20% of output), improves accuracy by 2-4% over standard GGUFs",
-        "Thinking mode by default: generates <think></think> blocks for extended reasoning — disable via enable_thinking=false",
-        "Context: 262,144 tokens native, extensible to 1,010,000 with YaRN RoPE scaling",
-        "Vision: Activated but requires separate mmproj file download",
-        "Official sampling: Instruct (non-thinking) temp=0.7, top_p=0.80, top_k=20, min_p=0.0, presence_penalty=1.5, repeat_penalty=1.0"
+        "256K native context; vision activated (requires mmproj file)",
+        "NEO IMATRIX Q4_K_S quant (MTP available) — improved accuracy and multi-token prediction (MTP)",
+        "Suggested sampling (thinking): temperature=1.0, top_p=0.95, top_k=20, min_p=0.0, presence_penalty=0.0, repeat_penalty=1.0",
+        "Suggested sampling (instruct/non-thinking): temperature=0.7, top_p=0.8, top_k=20, presence_penalty=1.5, repeat_penalty=1.0",
+        "File size (remote): ~17.1 GB; SHA256: 2ceb104ceef01e880e1e65ee300006482aa0068ca7753fb35ee06f5751f06654",
+        "Xet hash: 5c88516c0c71435ad3fcc1eb68448aa75c915acdbcd64cb4d97e203bf790a0d5",
+        "Contains both regular and MTP NEO IMATRIX quants — test both for throughput vs. acceptance tradeoffs"
       ],
       "parameters": {
         "temperature": 0.7,
@@ -47,15 +46,15 @@
         "min_p": 0.0,
         "repeat_penalty": 1.0,
         "top_k": 20,
-        "ctx_size": 32768,
+        "ctx_size": 262144,
         "n_predict": 512,
         "n_threads": 12,
-        "n_gpu_layers": 99,
+        "n_gpu_layers": 999,
         "flash_attn": true,
         "jinja": true,
-        "cache_type_k": "q8_0",
-        "cache_type_v": "q8_0",
-        "enable_thinking": false
+        "cache_type_k": "q4_k_s",
+        "cache_type_v": "q4_k_s",
+        "enable_thinking": true
       }
     },
     {
