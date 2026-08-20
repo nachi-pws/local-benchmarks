@@ -1,6 +1,6 @@
 ﻿{
   "llamaServerVersions": {
-    "default": "b10448",
+    "default": "b10516",
     "available": {
       // "HIP-b8662": {
       //   "path": "D:\\Llama-Server-Exes\\llama-b8662-bin-win-hip-radeon-x64\\llama-server.exe",
@@ -10,9 +10,9 @@
         "path": "D:\\Llama-Server-Exes\\llama-b8838-bin-win-hip-radeon-x64\\llama-server.exe",
         "label": "Build 8838 (HIP Radeon)  - more fixes + b8833 (ggml-webgpu: fix compiler warnings and refactor FlashAttention encoding"
       },      
-      "vulkan-b10448": {
-        "path": "D:\\Llama-Server-Exes\\llama-b10448-bin-win-vulkan-x64\\llama-server.exe",
-        "label": "Latest Vulkan Build (b10448) - RECOMMENDED for EVO X2 Strix Halo. Kimi-K3 support, server improvements"
+      "vulkan-b10516": {
+        "path": "D:\\Llama-Server-Exes\\llama-b10516-bin-win-vulkan-x64\\llama-server.exe",
+        "label": "Latest Vulkan Build (b10516) - RECOMMENDED for EVO X2 Strix Halo. Kimi-K3 support, server improvements"
       },
       "vulkan-b10447": {
         "path": "D:\\Llama-Server-Exes\\llama-b10447-bin-win-vulkan-x64\\llama-server.exe",
@@ -20,7 +20,7 @@
       },
       "vulkan-b8672": {
         "path": "D:\\Llama-Server-Exes\\llama-b8672-bin-win-vulkan-x64\\llama-server.exe",
-        "label": "Legacy Vulkan Build (b8672) - DEPRECATED, outdated. Use b10448 instead"
+        "label": "Legacy Vulkan Build (b8672) - DEPRECATED, outdated. Use b10516 instead"
       }
     }
   },
@@ -52,8 +52,8 @@
         "n_gpu_layers": 999,
         "flash_attn": true,
         "jinja": true,
-        "cache_type_k": "q4_k_s",
-        "cache_type_v": "q4_k_s",
+        "cache_type_k": "q4_1",
+        "cache_type_v": "q4_1",
         "enable_thinking": true
       }
     },
